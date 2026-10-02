@@ -1,0 +1,7 @@
+{
+  "name": "AirGuard AI — Intelligent Air Quality Protection",
+  "description": "Real-time air-quality intelligence, environmental monitoring, dynamic mapping, and integrated AI advisor powered by real Open-Meteo data.",
+  "requestFramePermissions": ["geolocation", "camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
