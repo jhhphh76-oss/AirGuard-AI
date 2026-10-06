@@ -32,7 +32,6 @@ export interface Pollutants {
   no2: number | null;
   o3: number | null;
   so2: number | null;
-  nh3: number | null; // Ammonia (NH3) from Open-Meteo Air Quality API
 }
 
 export interface EnvironmentalIndicators {
@@ -90,6 +89,21 @@ export interface HistoryRecord {
   pollutants: Pollutants;
   indicators?: EnvironmentalIndicators;
   source: string;
+  // Photo analysis record fields (Requirements 7 & 8)
+  recordType?: 'telemetry' | 'photo_analysis';
+  imageDataUrl?: string | null;
+  photoAnalysis?: {
+    whatMayBeIrritating?: string;
+    whyThisMatters?: string;
+    doList?: string[];
+    dontList?: string[];
+    whenToGetHelp?: string;
+    researchAnalysis?: string;
+    symptoms?: string[];
+    precautions?: string[];
+    potentialFactors?: string;
+    visibleContent?: string;
+  };
 }
 
 export interface SaferLocationPoint {
@@ -148,7 +162,18 @@ export interface AQINotification {
 }
 
 export interface NotificationSettings {
-  enabled: boolean;
-  minDeltaThreshold: number; // e.g. 12
+  notificationsEnabled: boolean; // Master Notifications ON / OFF switch
+  aqiAlertsEnabled: boolean; // AQI Change Alerts ON / OFF switch
+  minDeltaThreshold: number; // e.g. 12 points
   notifyOnCategoryChange: boolean;
+  scheduledTestTime: number | null; // Epoch ms for 1-hour scheduled test
+  lastNotificationTime: number | null; // Epoch ms
+  lastAlertCondition: string | null; // Summary of last alert condition
+  lastResult?: {
+    success: boolean;
+    message: string;
+    timestamp: number;
+    status?: 'granted' | 'denied' | 'default' | 'unsupported' | 'error';
+  } | null;
+  enabled: boolean; // Synchronized with notificationsEnabled for compatibility
 }

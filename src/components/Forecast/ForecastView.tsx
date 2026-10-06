@@ -325,13 +325,16 @@ export const ForecastView: React.FC<ForecastViewProps> = ({ reading, forecast })
             <TrendingUp className="w-4 h-4 text-[#38BDF8]" />
             <span>AI Atmospheric Forecast</span>
           </div>
-          <span className="text-[10px] font-mono text-slate-400 truncate max-w-[150px]">
+          <span
+            className="text-[10px] font-mono text-slate-400 truncate max-w-[180px] shrink-0 text-right"
+            title={`${location.name}${location.admin1 ? `, ${location.admin1}` : ''}, ${location.country}`}
+          >
             {location.name}
           </span>
         </div>
 
         <div>
-          <h1 className="text-lg font-bold text-white">Forecast for {location.name}</h1>
+          <h1 className="text-lg font-bold text-white break-words">Forecast for {location.name}</h1>
           <p className="text-xs text-slate-400 mt-0.5 font-mono">
             {location.latitude.toFixed(4)}°, {location.longitude.toFixed(4)}°
           </p>

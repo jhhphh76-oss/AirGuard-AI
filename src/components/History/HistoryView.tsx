@@ -2,6 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { HistoryRecord, PrimaryNavTab } from '../../types/airguard';
 import { historyService } from '../../services/historyService';
 import { notificationService } from '../../services/notificationService';
+import { researchAnalysisService } from '../../services/research/researchAnalysisService';
+import { ResearchMeasurementRecord } from '../../services/research/types';
+import { ResearchMeasurementModal } from '../Research/ResearchMeasurementModal';
 import {
   History,
   Trash2,
@@ -19,6 +22,13 @@ import {
   ChevronUp,
   Bell,
   Settings,
+  Camera,
+  Layers,
+  Shield,
+  Check,
+  Activity,
+  CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface HistoryViewProps {
@@ -32,7 +42,12 @@ interface DateGroup {
 }
 
 export const HistoryView: React.FC<HistoryViewProps> = ({ onNavigate, onOpenSettings }) => {
+  const [historyTab, setHistoryTab] = useState<'air_quality' | 'research'>('air_quality');
   const [records, setRecords] = useState<HistoryRecord[]>([]);
+  const [researchRecords, setResearchRecords] = useState<ResearchMeasurementRecord[]>([]);
+  const [selectedResearchRecord, setSelectedResearchRecord] = useState<ResearchMeasurementRecord | null>(null);
+  const [isResearchModalOpen, setIsResearchModalOpen] = useState(false);
+
   const [showAllHistory, setShowAllHistory] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
@@ -42,36 +57,57 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onNavigate, onOpenSett
   );
 
   useEffect(() => {
-    loadRecords();
+    loadAllRecords();
     const unsub = notificationService.onSettingsChange((s) => {
       setNotificationsEnabled(s.enabled);
     });
     return unsub;
   }, []);
 
-  const loadRecords = () => {
+  const loadAllRecords = () => {
     setRecords(historyService.getHistory());
+    setResearchRecords(researchAnalysisService.getMeasurements());
   };
 
   const handleDelete = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     historyService.deleteRecord(id);
-    loadRecords();
+    loadAllRecords();
+  };
+
+  const handleDeleteResearchRecord = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    researchAnalysisService.deleteMeasurement(id);
+    loadAllRecords();
   };
 
   const handleClearAll = () => {
-    historyService.clearHistory();
-    setRecords([]);
+    if (historyTab === 'air_quality') {
+      historyService.clearHistory();
+    } else {
+      researchAnalysisService.clearAllMeasurements();
+    }
+    loadAllRecords();
     setShowClearConfirm(false);
   };
 
   const handleExportCSV = () => {
-    const csvStr =
-      'data:text/csv;charset=utf-8,' + encodeURIComponent(historyService.exportHistoryAsCSV());
-    const dlAnchorElem = document.createElement('a');
-    dlAnchorElem.setAttribute('href', csvStr);
-    dlAnchorElem.setAttribute('download', `airguard_history_${Date.now()}.csv`);
-    dlAnchorElem.click();
+    if (historyTab === 'air_quality') {
+      const csvStr =
+        'data:text/csv;charset=utf-8,' + encodeURIComponent(historyService.exportHistoryAsCSV());
+      const dlAnchorElem = document.createElement('a');
+      dlAnchorElem.setAttribute('href', csvStr);
+      dlAnchorElem.setAttribute('download', `airguard_history_${Date.now()}.csv`);
+      dlAnchorElem.click();
+    } else {
+      const csvStr =
+        'data:text/csv;charset=utf-8,' +
+        encodeURIComponent(researchAnalysisService.exportResearchMeasurementsAsCSV());
+      const dlAnchorElem = document.createElement('a');
+      dlAnchorElem.setAttribute('href', csvStr);
+      dlAnchorElem.setAttribute('download', `airguard_optical_research_${Date.now()}.csv`);
+      dlAnchorElem.click();
+    }
   };
 
   // Filter records based on search term
@@ -108,24 +144,22 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onNavigate, onOpenSett
         label = 'Yesterday';
       } else {
         label = recDate.toLocaleDateString('en-US', {
-          month: 'long',
+          month: 'short',
           day: 'numeric',
-          year: recDate.getFullYear() !== now.getFullYear() ? 'numeric' : undefined,
         });
       }
 
-      const key = `date_${recMidnight}`;
-      if (!groups[key]) {
-        groups[key] = { dateLabel: label, records: [] };
-        order.push(key);
+      if (!groups[label]) {
+        groups[label] = { dateLabel: label, records: [] };
+        order.push(label);
       }
-      groups[key].records.push(rec);
+      groups[label].records.push(rec);
     }
 
-    return order.map((k) => groups[k]);
+    return order.map((lbl) => groups[lbl]);
   }, [filteredRecords]);
 
-  // For compact Main History view: show recent date groups (e.g. up to 6 records total)
+  // Recent preview (max 6 items)
   const compactGroups = useMemo(() => {
     let count = 0;
     const result: DateGroup[] = [];
@@ -217,89 +251,49 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onNavigate, onOpenSett
         onClick={() => setExpandedRecordId(isExpanded ? null : rec.id)}
         className="rounded-xl bg-[#071A24] border border-slate-800/80 hover:border-slate-700/80 transition-all cursor-pointer overflow-hidden shadow-sm"
       >
-        {/* Compact Single Row matching format: 17:00 — AQI 82 — Moderate */}
-        <div className="py-2.5 px-3 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0 font-mono text-xs">
-            <span className="text-slate-400 font-semibold shrink-0">
-              {rec.time ? rec.time.slice(0, 5) : '—'}
-            </span>
-            <span className="text-slate-600">—</span>
-            <span className="text-white font-bold shrink-0">AQI {rec.aqi}</span>
-            <span className="text-slate-600">—</span>
-            <span
-              className="font-semibold truncate max-w-[120px]"
-              style={{ color }}
-            >
-              {rec.category}
-            </span>
+        <div className="p-2.5 flex items-center justify-between text-xs gap-2 select-none">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <span className="font-mono text-slate-400 text-[11px] shrink-0">{rec.time.slice(0, 5)}</span>
+            <span className="text-slate-600 shrink-0">·</span>
+            <span className="font-bold text-white text-[11px] shrink-0 font-mono">AQI {rec.aqi}</span>
+            <span className="text-slate-600 shrink-0">·</span>
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+              <span
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: color }}
+              />
+              <span
+                className="text-[11px] font-medium truncate text-slate-200"
+                title={`${rec.category} in ${rec.location.name}`}
+              >
+                {rec.category} in {rec.location.name}
+              </span>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-[10px] text-slate-400 font-sans truncate max-w-[85px]">
-              {rec.location.name}
-            </span>
+          <div className="flex items-center gap-1 shrink-0">
             {isExpanded ? (
-              <ChevronUp className="w-3.5 h-3.5 text-slate-500" />
+              <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
             ) : (
-              <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
             )}
           </div>
         </div>
 
-        {/* Expandable Pollutant Breakdown when tapped */}
         {isExpanded && (
-          <div className="px-3 pb-3 pt-1 border-t border-slate-800/70 bg-[#05141D] space-y-2 text-xs animate-in fade-in">
-            <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-0.5">
-              <span>{rec.location.name}, {rec.location.country || ''}</span>
-              <span>{rec.date} {rec.time}</span>
+          <div className="px-3 pb-3 pt-1 border-t border-slate-800/80 bg-[#09212D]/40 space-y-2 text-xs">
+            <div className="grid grid-cols-2 gap-2 text-[10px] font-mono text-slate-300 pt-1">
+              <div>PM2.5: {rec.pollutants.pm2_5 ?? 'N/A'} µg/m³</div>
+              <div>PM10: {rec.pollutants.pm10 ?? 'N/A'} µg/m³</div>
+              <div>O₃: {rec.pollutants.o3 ?? 'N/A'} µg/m³</div>
+              <div>NO₂: {rec.pollutants.no2 ?? 'N/A'} µg/m³</div>
             </div>
-
-            <div className="grid grid-cols-3 gap-1.5 font-mono text-[10px]">
-              <div className="p-1.5 rounded-lg bg-[#071A24] border border-slate-800">
-                <span className="text-slate-400 block text-[9px]">PM2.5</span>
-                <span className="font-bold text-white">
-                  {rec.pollutants.pm2_5 !== null ? `${rec.pollutants.pm2_5} µg/m³` : 'N/A'}
-                </span>
-              </div>
-              <div className="p-1.5 rounded-lg bg-[#071A24] border border-slate-800">
-                <span className="text-slate-400 block text-[9px]">PM10</span>
-                <span className="font-bold text-white">
-                  {rec.pollutants.pm10 !== null ? `${rec.pollutants.pm10} µg/m³` : 'N/A'}
-                </span>
-              </div>
-              <div className="p-1.5 rounded-lg bg-[#071A24] border border-slate-800">
-                <span className="text-slate-400 block text-[9px]">NO₂</span>
-                <span className="font-bold text-white">
-                  {rec.pollutants.no2 !== null ? `${rec.pollutants.no2} µg/m³` : 'N/A'}
-                </span>
-              </div>
-              <div className="p-1.5 rounded-lg bg-[#071A24] border border-slate-800">
-                <span className="text-slate-400 block text-[9px]">O₃</span>
-                <span className="font-bold text-white">
-                  {rec.pollutants.o3 !== null ? `${rec.pollutants.o3} µg/m³` : 'N/A'}
-                </span>
-              </div>
-              <div className="p-1.5 rounded-lg bg-[#071A24] border border-slate-800">
-                <span className="text-slate-400 block text-[9px]">CO</span>
-                <span className="font-bold text-white">
-                  {rec.pollutants.co !== null ? `${rec.pollutants.co} µg/m³` : 'N/A'}
-                </span>
-              </div>
-              <div className="p-1.5 rounded-lg bg-[#071A24] border border-slate-800">
-                <span className="text-slate-400 block text-[9px]">SO₂</span>
-                <span className="font-bold text-white">
-                  {rec.pollutants.so2 !== null ? `${rec.pollutants.so2} µg/m³` : 'N/A'}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between pt-1">
-              <span className="text-[9px] font-mono text-slate-500">Source: Open-Meteo Verified Feed</span>
+            <div className="flex items-center justify-between pt-1 border-t border-slate-800 text-[10px]">
+              <span className="text-slate-400 font-mono">Source: {rec.source}</span>
               <button
                 type="button"
                 onClick={(e) => handleDelete(rec.id, e)}
-                className="text-[10px] text-slate-400 hover:text-[#EF4444] flex items-center gap-1 font-semibold transition-colors"
-                title="Delete this record"
+                className="text-red-400 hover:text-red-300 p-1 flex items-center gap-1"
               >
                 <Trash2 className="w-3 h-3" />
                 <span>Delete</span>
@@ -311,287 +305,451 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onNavigate, onOpenSett
     );
   };
 
-  // -------------------------------------------------------------
-  // VIEW MODE: EXPANDED FULL HISTORY VIEW ("See More History")
-  // -------------------------------------------------------------
-  if (showAllHistory) {
-    return (
-      <div className="p-4 space-y-4 pb-8 animate-in fade-in">
-        {/* Navigation back to compact view */}
-        <div className="flex items-center justify-between">
-          <button
-            type="button"
-            onClick={() => setShowAllHistory(false)}
-            className="py-2 px-3 rounded-xl bg-[#09212D] hover:bg-slate-800 border border-[#263238] text-white font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <ArrowLeft className="w-3.5 h-3.5 text-[#5EEAD4]" />
-            <span>← Back to Summary</span>
-          </button>
-          <span className="text-[10px] font-mono text-slate-400 bg-slate-900 px-2.5 py-1 rounded-full border border-slate-800">
-            {filteredRecords.length} stored records
-          </span>
-        </div>
+  // Chronological research records (Measurement 1, 2, 3...)
+  const chronologicalResearch = useMemo(() => {
+    return [...researchRecords].sort((a, b) => a.timestamp - b.timestamp);
+  }, [researchRecords]);
 
-        {/* Search Bar & Actions */}
-        <div className="p-4 rounded-3xl bg-[#09212D] border border-[#263238] space-y-2.5 shadow-lg">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-bold text-white">Complete Stored History</h2>
-              <p className="text-[10px] text-slate-400">All sessions grouped chronologically by date</p>
-            </div>
-            {records.length > 0 && (
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleExportCSV}
-                  className="py-1 px-2.5 rounded-lg bg-[#071A24] hover:bg-slate-800 text-slate-300 text-[10px] font-semibold flex items-center gap-1 border border-slate-700/80 transition-colors"
-                  title="Export records to CSV"
-                >
-                  <Download className="w-3 h-3 text-[#22C55E]" />
-                  <span>CSV</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowClearConfirm(true)}
-                  className="py-1 px-2.5 rounded-lg bg-[#EF4444]/15 hover:bg-[#EF4444]/25 text-[#EF4444] text-[10px] font-semibold flex items-center gap-1 border border-[#EF4444]/30 transition-colors"
-                >
-                  <Trash2 className="w-3 h-3" />
-                  <span>Clear</span>
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="relative pt-1">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search by city, date or category..."
-              className="w-full pl-9 pr-3 py-2 bg-[#071A24] border border-[#263238] rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#06B6D4]"
-            />
-          </div>
-
-          {/* Confirm clear inline */}
-          {showClearConfirm && (
-            <div className="p-3 rounded-2xl bg-[#EF4444]/15 border border-[#EF4444]/40 space-y-2 animate-in fade-in">
-              <p className="text-xs text-white font-semibold">
-                Clear all {records.length} stored history records?
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleClearAll}
-                  className="flex-1 py-1.5 rounded-xl bg-[#EF4444] text-white text-xs font-bold"
-                >
-                  Yes, Clear All
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowClearConfirm(false)}
-                  className="flex-1 py-1.5 rounded-xl bg-slate-800 text-slate-300 text-xs"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Grouped Records List */}
-        {groupedAllRecords.length === 0 ? (
-          <div className="p-8 rounded-3xl bg-[#09212D]/60 border border-[#263238] text-center space-y-2">
-            <p className="text-xs font-semibold text-white">No matching records found.</p>
-            <p className="text-[11px] text-slate-400">Try adjusting your search query.</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {groupedAllRecords.map((group) => (
-              <section key={group.dateLabel} className="space-y-2">
-                <div className="px-1 flex items-center justify-between">
-                  <h3 className="text-xs font-bold text-slate-300 font-mono flex items-center gap-1.5">
-                    <Calendar className="w-3.5 h-3.5 text-[#06B6D4]" />
-                    <span>{group.dateLabel}</span>
-                  </h3>
-                  <span className="text-[10px] text-slate-500 font-mono">
-                    {group.records.length} {group.records.length === 1 ? 'record' : 'records'}
-                  </span>
-                </div>
-
-                <div className="space-y-1.5">
-                  {group.records.map((rec) => renderHistoryRow(rec))}
-                </div>
-              </section>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // -------------------------------------------------------------
-  // VIEW MODE: COMPACT MAIN HISTORY VIEW (Default)
-  // -------------------------------------------------------------
   return (
-    <div className="p-4 space-y-4 pb-8 animate-in fade-in">
-      {/* 1. Header with Summary Stats & Notification Quick Toggle */}
+    <div className="p-4 space-y-4 pb-8 select-none">
+      {/* 1. Header with Tab Switcher */}
       <section className="p-4 rounded-3xl bg-[#09212D] border border-[#263238] space-y-3 shadow-lg">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5 text-xs uppercase font-mono font-semibold text-slate-400">
             <History className="w-4 h-4 text-slate-300" />
             <span>AirGuard History</span>
           </div>
-          <span className="text-[10px] font-mono text-[#5EEAD4] bg-[#0F766E]/25 px-2.5 py-0.5 rounded-full border border-[#0F766E]/40">
-            {records.length} saved {records.length === 1 ? 'reading' : 'readings'}
-          </span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={handleExportCSV}
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-mono flex items-center gap-1 cursor-pointer transition-colors"
+              title="Export CSV data"
+            >
+              <Download className="w-3 h-3" />
+              <span>CSV</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowClearConfirm(true)}
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 text-[10px] font-mono flex items-center gap-1 cursor-pointer transition-colors"
+              title="Clear history"
+            >
+              <Trash2 className="w-3 h-3" />
+            </button>
+          </div>
         </div>
 
         <div>
-          <h1 className="text-lg font-bold text-white">Telemetry Timeline</h1>
+          <h1 className="text-lg font-bold text-white">Historical Telemetry & Research</h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            Preserved air-quality records collected during actual Open-Meteo checks
+            Preserved environmental air records and optical skin research measurements
           </p>
         </div>
 
-        {/* Notification settings link */}
-        <div className="pt-1 flex items-center justify-between p-2.5 rounded-2xl bg-[#071A24] border border-slate-800">
-          <div className="flex items-center gap-2">
-            <Bell className={`w-3.5 h-3.5 ${notificationsEnabled ? 'text-[#5EEAD4]' : 'text-slate-500'}`} />
-            <span className="text-[11px] text-slate-300 font-medium">
-              AQI Notifications:
-            </span>
-            <span
-              className={`text-[10px] font-mono font-bold ${
-                notificationsEnabled ? 'text-[#5EEAD4]' : 'text-slate-400'
-              }`}
-            >
-              {notificationsEnabled ? 'ON' : 'OFF'}
-            </span>
-          </div>
-          {onOpenSettings && (
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className="text-[11px] font-semibold text-[#06B6D4] hover:underline flex items-center gap-1"
-            >
-              <Settings className="w-3 h-3" />
-              <span>Configure</span>
-            </button>
-          )}
-        </div>
-      </section>
-
-      {/* 2. Visual History Trend Curve */}
-      <section className="p-4 rounded-3xl bg-[#09212D] border border-[#263238] space-y-2 shadow-lg">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono flex items-center gap-1.5">
-            <BarChart3 className="w-3.5 h-3.5 text-[#06B6D4]" />
-            <span>Recorded AQI History Curve</span>
-          </h2>
-          <span className="text-[10px] font-mono text-slate-400">
-            {chartRecords.length} points
-          </span>
+        {/* Tab Switcher Pills */}
+        <div className="grid grid-cols-2 gap-1.5 pt-1">
+          <button
+            type="button"
+            onClick={() => setHistoryTab('air_quality')}
+            className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+              historyTab === 'air_quality'
+                ? 'bg-[#0F766E]/30 border-[#06B6D4] text-white shadow-md'
+                : 'bg-[#071A24] border-slate-800 text-slate-400 hover:text-white'
+            }`}
+          >
+            <History className="w-3.5 h-3.5 text-[#06B6D4]" />
+            <span>Air Quality ({records.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setHistoryTab('research')}
+            className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+              historyTab === 'research'
+                ? 'bg-[#0F766E]/30 border-[#5EEAD4] text-white shadow-md'
+                : 'bg-[#071A24] border-slate-800 text-slate-400 hover:text-white'
+            }`}
+          >
+            <Camera className="w-3.5 h-3.5 text-[#5EEAD4]" />
+            <span>Research ({researchRecords.length})</span>
+          </button>
         </div>
 
-        {!hasEnoughRecords ? (
-          <div className="p-4 text-center rounded-2xl bg-[#071A24] border border-slate-800 space-y-1">
-            <p className="text-xs font-semibold text-slate-300">
-              Not enough readings yet to chart a multi-point trend curve.
+        {/* Clear Confirmation Prompt */}
+        {showClearConfirm && (
+          <div className="p-3 rounded-2xl bg-[#EF4444]/15 border border-[#EF4444]/40 text-xs text-white space-y-2 animate-in fade-in">
+            <span className="font-bold text-[#EF4444] block">
+              Clear all {historyTab === 'air_quality' ? 'air quality records' : 'research measurements'}?
+            </span>
+            <p className="text-[11px] text-slate-300">
+              This action cannot be undone. Saved records will be permanently removed.
             </p>
-            <p className="text-[10px] text-slate-500">
-              Readings are saved automatically as you check air quality.
-            </p>
-          </div>
-        ) : (
-          <div className="w-full overflow-hidden select-none pt-1">
-            <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="w-full h-auto overflow-visible">
-              <path
-                d={pointsPath}
-                fill="none"
-                stroke="#06B6D4"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              {chartRecords.map((r, idx) => (
-                <circle
-                  key={r.id}
-                  cx={getX(idx)}
-                  cy={getY(r.aqi)}
-                  r={3.5}
-                  fill="#5EEAD4"
-                  stroke="#071A24"
-                  strokeWidth="1.5"
-                />
-              ))}
-            </svg>
-            <div className="flex justify-between text-[9px] font-mono text-slate-500 px-2 pt-1 border-t border-slate-800 mt-1">
-              <span>{chartRecords[0]?.date}</span>
-              <span>{chartRecords[chartRecords.length - 1]?.date}</span>
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(false)}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 text-slate-300 text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleClearAll}
+                className="px-3 py-1.5 rounded-xl bg-[#EF4444] text-white font-bold text-xs"
+              >
+                Confirm Clear
+              </button>
             </div>
           </div>
         )}
       </section>
 
-      {/* 3. AI Long-Term Trend Summary */}
-      {hasEnoughRecords && (
-        <section className="p-3.5 rounded-2xl bg-[#09212D] border border-[#263238] space-y-1.5 shadow-md">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-3.5 h-3.5 text-[#5EEAD4]" />
-            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-300">
-              Exposure Trend Analysis
-            </span>
-          </div>
-          <p className="text-xs text-slate-200 leading-relaxed">
-            {trendExplanation}
-          </p>
-        </section>
-      )}
-
-      {/* 4. COMPACT RECENT AIR QUALITY LIST (Matches user requirement) */}
-      <section className="space-y-3">
-        <div className="px-1 flex items-center justify-between">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-300 font-mono">
-            Recent Air Quality
-          </h2>
-          <span className="text-[10px] font-mono text-slate-500">Compact list</span>
-        </div>
-
-        {records.length === 0 ? (
-          <div className="p-6 rounded-3xl bg-[#09212D]/60 border border-[#263238] text-center space-y-2">
-            <div className="w-10 h-10 rounded-2xl bg-[#0F766E]/20 text-[#06B6D4] mx-auto flex items-center justify-center">
-              <History className="w-5 h-5" />
+      {/* =================================================================== */}
+      {/* TAB 1: AIR QUALITY TELEMETRY                                        */}
+      {/* =================================================================== */}
+      {historyTab === 'air_quality' && (
+        <div className="space-y-4 animate-in fade-in">
+          {/* Notification settings link */}
+          <div className="flex items-center justify-between p-2.5 rounded-2xl bg-[#09212D] border border-slate-800 gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <Bell className={`w-3.5 h-3.5 shrink-0 ${notificationsEnabled ? 'text-[#5EEAD4]' : 'text-slate-500'}`} />
+              <span className="text-[11px] text-slate-300 font-medium truncate">
+                AQI Notifications:
+              </span>
+              <span
+                className={`text-[10px] font-mono font-bold shrink-0 ${
+                  notificationsEnabled ? 'text-[#5EEAD4]' : 'text-slate-400'
+                }`}
+              >
+                {notificationsEnabled ? 'ON' : 'OFF'}
+              </span>
             </div>
-            <p className="text-xs font-semibold text-white">No Telemetry Logged Yet</p>
-            <p className="text-[11px] text-slate-400">
-              When you check air quality, verified readings are saved here.
-            </p>
+            {onOpenSettings && (
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                className="text-[11px] font-semibold text-[#06B6D4] hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
+              >
+                <Settings className="w-3 h-3 shrink-0" />
+                <span>Configure</span>
+              </button>
+            )}
           </div>
-        ) : (
-          <div className="space-y-3">
-            {compactGroups.map((group) => (
-              <div key={group.dateLabel} className="space-y-1.5">
-                <span className="text-[11px] font-bold text-slate-300 block px-1">
-                  {group.dateLabel}
-                </span>
-                <div className="space-y-1.5">
-                  {group.records.map((rec) => renderHistoryRow(rec))}
+
+          {/* Visual History Trend Curve */}
+          <section className="p-4 rounded-3xl bg-[#09212D] border border-[#263238] space-y-2 shadow-lg">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono flex items-center gap-1.5">
+                <BarChart3 className="w-3.5 h-3.5 text-[#06B6D4]" />
+                <span>Recorded AQI History Curve</span>
+              </h2>
+              <span className="text-[10px] font-mono text-slate-400">
+                {chartRecords.length} points
+              </span>
+            </div>
+
+            {!hasEnoughRecords ? (
+              <div className="p-4 text-center rounded-2xl bg-[#071A24] border border-slate-800 space-y-1">
+                <p className="text-xs font-semibold text-slate-300">
+                  Not enough readings yet to chart a multi-point trend curve.
+                </p>
+                <p className="text-[10px] text-slate-500">
+                  Readings are saved automatically as you check air quality.
+                </p>
+              </div>
+            ) : (
+              <div className="w-full overflow-hidden select-none pt-1">
+                <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="w-full h-auto overflow-visible">
+                  <path
+                    d={pointsPath}
+                    fill="none"
+                    stroke="#06B6D4"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  {chartRecords.map((r, idx) => (
+                    <circle
+                      key={r.id}
+                      cx={getX(idx)}
+                      cy={getY(r.aqi)}
+                      r={3.5}
+                      fill="#5EEAD4"
+                      stroke="#071A24"
+                      strokeWidth="1.5"
+                    />
+                  ))}
+                </svg>
+                <div className="flex justify-between text-[9px] font-mono text-slate-500 px-2 pt-1 border-t border-slate-800 mt-1">
+                  <span>{chartRecords[0]?.date}</span>
+                  <span>{chartRecords[chartRecords.length - 1]?.date}</span>
                 </div>
               </div>
-            ))}
+            )}
+          </section>
 
-            {/* Prominent "See more history →" Button */}
-            <button
-              type="button"
-              onClick={() => setShowAllHistory(true)}
-              className="w-full py-3.5 px-4 rounded-2xl bg-[#09212D] hover:bg-[#0F766E]/20 border border-[#263238] hover:border-[#0F766E]/60 text-[#5EEAD4] font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md group mt-2"
-            >
-              <span>See more history ({records.length} records) →</span>
-            </button>
-          </div>
-        )}
-      </section>
+          {/* AI Long-Term Trend Summary */}
+          {hasEnoughRecords && (
+            <section className="p-3.5 rounded-2xl bg-[#09212D] border border-[#263238] space-y-1.5 shadow-md">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-3.5 h-3.5 text-[#5EEAD4]" />
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-300">
+                  Exposure Trend Analysis
+                </span>
+              </div>
+              <p className="text-xs text-slate-200 leading-relaxed">
+                {trendExplanation}
+              </p>
+            </section>
+          )}
+
+          {/* Compact Recent Air Quality List */}
+          <section className="space-y-3">
+            <div className="px-1 flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-300 font-mono">
+                Recent Air Quality
+              </h2>
+              <span className="text-[10px] font-mono text-slate-500">Compact list</span>
+            </div>
+
+            {records.length === 0 ? (
+              <div className="p-6 rounded-3xl bg-[#09212D]/60 border border-[#263238] text-center space-y-2">
+                <div className="w-10 h-10 rounded-2xl bg-[#0F766E]/20 text-[#06B6D4] mx-auto flex items-center justify-center">
+                  <History className="w-5 h-5" />
+                </div>
+                <p className="text-xs font-semibold text-white">No Telemetry Logged Yet</p>
+                <p className="text-[11px] text-slate-400">
+                  When you check air quality, verified readings are saved here.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {(showAllHistory ? groupedAllRecords : compactGroups).map((group) => (
+                  <div key={group.dateLabel} className="space-y-1.5">
+                    <span className="text-[11px] font-bold text-slate-300 block px-1">
+                      {group.dateLabel}
+                    </span>
+                    <div className="space-y-1.5">
+                      {group.records.map((rec) => renderHistoryRow(rec))}
+                    </div>
+                  </div>
+                ))}
+
+                {records.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllHistory(!showAllHistory)}
+                    className="w-full py-3.5 px-4 rounded-2xl bg-[#09212D] hover:bg-[#0F766E]/20 border border-[#263238] hover:border-[#0F766E]/60 text-[#5EEAD4] font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md group mt-2"
+                  >
+                    <span>
+                      {showAllHistory
+                        ? 'Show less history ↑'
+                        : `See More History (${records.length} records) →`}
+                    </span>
+                  </button>
+                )}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* TAB 2: OPTICAL RESEARCH MEASUREMENTS (Requirements 14 & 15)         */}
+      {/* =================================================================== */}
+      {historyTab === 'research' && (
+        <div className="space-y-4 animate-in fade-in">
+          {/* Research Timeline Visual Nodes (Requirement 15) */}
+          <section className="p-4 rounded-3xl bg-[#09212D] border border-[#263238] space-y-3 shadow-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-[#5EEAD4]" />
+                <h2 className="text-xs font-bold text-white uppercase tracking-wider font-mono">
+                  Research Timeline
+                </h2>
+              </div>
+              <span className="text-[10px] font-mono text-slate-400">
+                {chronologicalResearch.length} sessions
+              </span>
+            </div>
+
+            {chronologicalResearch.length === 0 ? (
+              <div className="p-4 text-center rounded-2xl bg-[#071A24] border border-slate-800 space-y-1">
+                <p className="text-xs font-semibold text-slate-300">
+                  No optical research sessions recorded yet.
+                </p>
+                <p className="text-[10px] text-slate-500">
+                  Open the Camera prototype to perform an optical acquisition.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto pb-1 pt-2">
+                <div className="flex items-center gap-2 min-w-max px-1">
+                  {chronologicalResearch.map((item, idx) => {
+                    const isLast = idx === chronologicalResearch.length - 1;
+                    return (
+                      <React.Fragment key={item.id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedResearchRecord(item);
+                            setIsResearchModalOpen(true);
+                          }}
+                          className="p-2.5 rounded-2xl bg-[#071A24] hover:bg-[#0F766E]/20 border border-slate-800 hover:border-[#0F766E] transition-all cursor-pointer text-left space-y-1 min-w-[110px]"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-mono font-bold text-[#5EEAD4]">
+                              #{item.sessionIndex}
+                            </span>
+                            <span className="text-[8px] font-mono px-1 rounded bg-slate-800 text-slate-400">
+                              {new Date(item.timestamp).toLocaleDateString([], { month: 'numeric', day: 'numeric' })}
+                            </span>
+                          </div>
+                          <div className="text-[10px] font-bold text-white truncate">
+                            {item.location?.name || 'Local Site'}
+                          </div>
+                          <div className="text-[9px] font-mono text-slate-400 truncate">
+                            {item.opticalFeatures?.nose?.variationCategory || 'Recorded'}
+                          </div>
+                        </button>
+                        {!isLast && (
+                          <div className="w-4 h-0.5 bg-slate-700 shrink-0" />
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* Research Measurements List (Requirement 14) */}
+          <section className="space-y-3">
+            <div className="px-1 flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-300 font-mono">
+                Optical Measurement Records
+              </h2>
+              <span className="text-[10px] font-mono text-slate-500">Tap to inspect</span>
+            </div>
+
+            {researchRecords.length === 0 ? (
+              <div className="p-6 rounded-3xl bg-[#09212D]/60 border border-[#263238] text-center space-y-2">
+                <div className="w-10 h-10 rounded-2xl bg-[#0F766E]/20 text-[#5EEAD4] mx-auto flex items-center justify-center">
+                  <Camera className="w-5 h-5" />
+                </div>
+                <p className="text-xs font-semibold text-white">No Optical Research Records</p>
+                <p className="text-[11px] text-slate-400">
+                  When you analyze photos with the Research Camera, complete records are preserved here.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {researchRecords.map((meas) => {
+                  const measDate = new Date(meas.timestamp).toLocaleDateString(undefined, {
+                    month: 'short',
+                    day: 'numeric',
+                  });
+                  const measTime = new Date(meas.timestamp).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  });
+
+                  return (
+                    <div
+                      key={meas.id}
+                      onClick={() => {
+                        setSelectedResearchRecord(meas);
+                        setIsResearchModalOpen(true);
+                      }}
+                      className="p-3 rounded-2xl bg-[#09212D] border border-slate-800 hover:border-[#0F766E]/60 transition-all cursor-pointer shadow-md space-y-2"
+                    >
+                      {/* Top Row: Date/Time + Location + Simulation Badge */}
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5">
+                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                          <span className="font-mono font-bold text-[#5EEAD4] text-xs shrink-0">
+                            #{meas.sessionIndex}
+                          </span>
+                          <span className="text-slate-500 shrink-0">·</span>
+                          <span className="font-mono text-slate-400 text-[11px] shrink-0 whitespace-nowrap">
+                            {measDate} {measTime}
+                          </span>
+                          <span className="text-slate-500 shrink-0">·</span>
+                          <span className="font-semibold text-white text-xs truncate min-w-0 flex-1">
+                            {meas.location?.name || 'Local Site'}
+                          </span>
+                        </div>
+                        <span className="text-[9px] font-mono font-extrabold px-2 py-0.5 rounded-full bg-[#F59E0B]/20 text-[#F59E0B] border border-[#F59E0B]/40 shrink-0 whitespace-nowrap self-start sm:self-auto">
+                          SIMULATION
+                        </span>
+                      </div>
+
+                      {/* Required Metrics Grid (Requirement 14): Acquisition, Calibration, Image Quality, Environmental */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[10px] font-mono pt-1 border-t border-slate-800/80">
+                        <div className="p-1.5 rounded-lg bg-[#071A24] border border-slate-800">
+                          <span className="text-slate-500 block text-[8px] uppercase">Mode</span>
+                          <span className="text-slate-300 font-bold">
+                            {meas.acquisitionMode === 'live_camera' ? 'Camera' : 'Gallery'}
+                          </span>
+                        </div>
+
+                        <div className="p-1.5 rounded-lg bg-[#071A24] border border-slate-800">
+                          <span className="text-slate-500 block text-[8px] uppercase">Calibration</span>
+                          <span
+                            className={
+                              meas.calibration.isReady ? 'text-[#22C55E] font-bold' : 'text-[#EF4444]'
+                            }
+                          >
+                            {meas.calibration.isReady ? '✓ Valid' : 'Incomplete'}
+                          </span>
+                        </div>
+
+                        <div className="p-1.5 rounded-lg bg-[#071A24] border border-slate-800">
+                          <span className="text-slate-500 block text-[8px] uppercase">Quality</span>
+                          <span
+                            className={
+                              meas.imageQuality.qualityCategory === 'Good'
+                                ? 'text-[#22C55E] font-bold'
+                                : 'text-[#F59E0B]'
+                            }
+                          >
+                            {meas.imageQuality.qualityCategory}
+                          </span>
+                        </div>
+
+                        <div className="p-1.5 rounded-lg bg-[#071A24] border border-slate-800">
+                          <span className="text-slate-500 block text-[8px] uppercase">Atmosphere</span>
+                          <span className="text-[#38BDF8] font-bold truncate block">
+                            {meas.environmentalMeasurements?.measurements.aqi !== null
+                              ? `AQI ${meas.environmentalMeasurements?.measurements.aqi}`
+                              : 'Unavailable'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Bottom Subtext */}
+                      <div className="flex items-center justify-between text-[9px] text-slate-400 pt-0.5">
+                        <span>Analysis: {meas.dataStatus}</span>
+                        <div className="flex items-center gap-1.5 text-[#5EEAD4]">
+                          <span>Inspect Record →</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+
+      {/* Full Research Measurement Detail Modal (Requirement 14) */}
+      <ResearchMeasurementModal
+        isOpen={isResearchModalOpen}
+        onClose={() => setIsResearchModalOpen(false)}
+        record={selectedResearchRecord}
+        onRecordUpdated={loadAllRecords}
+        onRecordDeleted={loadAllRecords}
+      />
     </div>
   );
 };

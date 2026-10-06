@@ -10,8 +10,10 @@ export type SymptomType =
   | 'Headache'
   | 'Nausea'
   | 'Fatigue / low energy'
+  | 'Check general exposure on face'
   | 'Other concern'
   | 'General pollution exposure'
+  | 'No symptoms / just checking air'
   | 'No symptoms — check air';
 
 export interface SymptomOption {
@@ -30,9 +32,9 @@ export const SYMPTOM_OPTIONS: SymptomOption[] = [
   { id: 'Headache', label: 'Headache', category: 'systemic' },
   { id: 'Nausea', label: 'Nausea', category: 'systemic' },
   { id: 'Fatigue / low energy', label: 'Fatigue / low energy', category: 'systemic' },
+  { id: 'Check general exposure on face', label: 'Check general exposure on face', category: 'general' },
   { id: 'Other concern', label: 'Other concern', category: 'general' },
-  { id: 'General pollution exposure', label: 'General pollution exposure', category: 'general' },
-  { id: 'No symptoms — check air', label: 'No symptoms — check air', category: 'general' },
+  { id: 'No symptoms / just checking air', label: 'No symptoms / just checking air', category: 'general' },
 ];
 
 export interface EnvironmentalGuidance {
@@ -47,13 +49,100 @@ export interface EnvironmentalGuidance {
   }[];
   urgencyWarning?: string;
   actionableSteps: string[];
+  // Big 3 Structure (Requirement 2)
+  whyThisMatters: string;
+  doList: string[];
+  dontList: string[];
+  whenToGetHelp: string;
 }
 
 /**
  * Builds non-diagnostic environmental health guidance based on the user's selected
- * symptom and actual measured air quality readings from Open-Meteo.
+ * symptom(s) and actual measured air quality readings from Open-Meteo.
  */
 export function getHealthGuidance(
+  symptomInput: SymptomType | SymptomType[],
+  reading: AQIReading,
+  customConcernText?: string
+): EnvironmentalGuidance {
+  const { aqi, category, pollutants, indicators } = reading;
+
+  // Handle multi-symptom array
+  if (Array.isArray(symptomInput)) {
+    if (symptomInput.length === 0) {
+      return getSingleSymptomGuidance('No symptoms / just checking air', reading, customConcernText);
+    }
+    if (symptomInput.length === 1) {
+      return getSingleSymptomGuidance(symptomInput[0], reading, customConcernText);
+    }
+
+    // Filter out "No symptoms" if mixed
+    const activeSymptoms = symptomInput.filter(
+      (s) => s !== 'No symptoms / just checking air' && s !== 'No symptoms — check air'
+    );
+
+    if (activeSymptoms.length === 0) {
+      return getSingleSymptomGuidance('No symptoms / just checking air', reading, customConcernText);
+    }
+
+    const individualResults = activeSymptoms.map((s) =>
+      getSingleSymptomGuidance(s, reading, customConcernText)
+    );
+
+    const title = `Reported Concerns: ${activeSymptoms.slice(0, 3).join(', ')}${
+      activeSymptoms.length > 3 ? ` +${activeSymptoms.length - 3} more` : ''
+    }`;
+
+    const environmentalExplanation = `Current environmental conditions may contribute to irritation or discomfort. Some pollutants can be associated with respiratory or irritation-related symptoms like ${activeSymptoms.join(
+      ', '
+    )}. Ambient air quality is a possible contributor rather than a proven cause, as non-environmental factors (allergens, indoor dust, viral irritation) can also cause similar symptoms.`;
+
+    const contributorsSet = new Set<string>();
+    individualResults.forEach((res) => {
+      res.possibleContributors.forEach((c) => contributorsSet.add(c));
+    });
+
+    const actionableSet = new Set<string>();
+    individualResults.forEach((res) => {
+      res.actionableSteps.forEach((step) => actionableSet.add(step));
+    });
+
+    const doSet = new Set<string>();
+    individualResults.forEach((res) => {
+      res.doList?.forEach((d) => doSet.add(d));
+    });
+
+    const dontSet = new Set<string>();
+    individualResults.forEach((res) => {
+      res.dontList?.forEach((d) => dontSet.add(d));
+    });
+
+    const urgencyWarning = individualResults.find((res) => res.urgencyWarning)?.urgencyWarning;
+
+    const whyThisMatters = `Current ambient conditions in ${reading.location.name} (AQI ${aqi}, ${category}) with ${reading.dominantPollutant} as primary pollutant may interact with mucous membranes or respiratory pathways. While environmental pollutants can irritate sensitive barriers, reported symptoms may also involve allergies, viral factors, or non-environmental causes.`;
+
+    const whenToGetHelp = urgencyWarning
+      ? urgencyWarning
+      : 'Seek professional medical advice if your symptoms persist for more than a few days, do not improve in clean indoor air, or if you develop fever, severe pain, or breathing difficulty.';
+
+    return {
+      title,
+      environmentalExplanation,
+      possibleContributors: Array.from(contributorsSet).slice(0, 6),
+      observedPollutantsStatus: individualResults[0].observedPollutantsStatus,
+      urgencyWarning,
+      actionableSteps: Array.from(actionableSet).slice(0, 6),
+      whyThisMatters,
+      doList: Array.from(doSet).slice(0, 4),
+      dontList: Array.from(dontSet).slice(0, 4),
+      whenToGetHelp,
+    };
+  }
+
+  return getSingleSymptomGuidance(symptomInput, reading, customConcernText);
+}
+
+function getSingleSymptomGuidance(
   symptom: SymptomType,
   reading: AQIReading,
   customConcernText?: string
@@ -133,6 +222,19 @@ export function getHealthGuidance(
           'Limit rubbing your eyes, as abrasive particles can scratch delicate corneal surfaces.',
           'Rest eyes from digital screens and use lubricating artificial tears if dryness persists.',
         ],
+        whyThisMatters:
+          'Elevated particulate matter (PM2.5 / PM10) and ozone can irritate the ocular surface tear film. Airborne dust can cause friction, dryness, and stinging sensations, though eye irritation also commonly stems from screen strain or allergies.',
+        doList: [
+          'Rinse eyes gently with clean water or sterile saline solution to flush airborne particles.',
+          'Wear wraparound sunglasses outdoors during windy or high-dust conditions.',
+          'Use lubricating artificial tears to support natural tear-film protection.',
+        ],
+        dontList: [
+          'Avoid rubbing your eyes, as abrasive particles can scratch corneal surfaces.',
+          'Avoid wearing soft contact lenses outdoors if eyes are already irritated by smog or dust.',
+        ],
+        whenToGetHelp:
+          'Seek medical attention if you experience severe eye pain, vision changes or blurring, extreme light sensitivity, or persistent thick discharge.',
       };
     }
 
@@ -154,6 +256,19 @@ export function getHealthGuidance(
           'Avoid harsh exfoliants while your skin feels sensitive or irritated.',
           'Consult a dermatologist if redness, hives, or swelling develops or persists.',
         ],
+        whyThisMatters:
+          'Fine particulates and combustion residue can deposit on exposed skin and disturb the lipid barrier, potentially contributing to localized dryness or itching. However, skin symptoms also frequently stem from contact allergies, eczema, or humidity changes.',
+        doList: [
+          'Wash exposed facial and neck skin with a mild, soap-free cleanser after outdoor exposure.',
+          'Apply an unscented barrier moisturizer to help seal the skin against particulate deposition.',
+          'Wear protective clothing or broad-spectrum mineral sunscreen when outdoors in traffic.',
+        ],
+        dontList: [
+          'Avoid aggressive chemical scrubs or hot water while skin feels irritated or sensitized.',
+          'Avoid scratching irritated areas, which can break the epidermal barrier and increase infection risk.',
+        ],
+        whenToGetHelp:
+          'Seek medical attention if you develop spreading redness, facial swelling, hives, open sores, or signs of localized infection.',
       };
     }
 
@@ -177,6 +292,19 @@ export function getHealthGuidance(
           'Avoid secondary respiratory irritants such as cigarette smoke, chemical cleaners, and incense.',
           'Gargle with warm salt water to soothe irritated pharyngeal tissues.',
         ],
+        whyThisMatters:
+          'Inhaled fine particles (PM2.5), nitrogen dioxide, and ozone can irritate the mucous membranes of the pharynx, contributing to dryness or scratchiness. Throat soreness can also stem from viral infections or vocal strain.',
+        doList: [
+          'Stay well hydrated with warm water or herbal teas to lubricate mucosal linings.',
+          'Consider wearing a certified N95/FFP2 respirator when commuting along busy roads.',
+          'Gargle with warm salt water to soothe sensitive pharyngeal tissue.',
+        ],
+        dontList: [
+          'Avoid exposure to secondary irritants such as tobacco smoke, vaping, or aerosol cleaners.',
+          'Avoid clearing your throat forcefully, which can further aggravate vocal cords.',
+        ],
+        whenToGetHelp:
+          'Seek medical attention if you experience difficulty swallowing, breathing trouble, high fever, or throat soreness persisting beyond several days.',
       };
     }
 
@@ -198,6 +326,19 @@ export function getHealthGuidance(
           'Change clothes and rinse your face after returning indoors from busy roads.',
           'Operate an indoor HEPA air purifier to reduce circulating coarse and fine allergens.',
         ],
+        whyThisMatters:
+          'Coarse particulate matter (PM10), road dust, and aeroallergens stimulate nasal sensory endings, triggering the sneezing reflex to clear trapped particles from the upper airway. Sneezing is a natural defense reflex that may also reflect allergic rhinitis.',
+        doList: [
+          'Keep windows closed during windy or high-traffic hours to reduce indoor dust.',
+          'Use a sterile saline nasal spray or gentle rinse to clear particles from nasal passages.',
+          'Rinse face and change clothing after spending extended time near heavy traffic.',
+        ],
+        dontList: [
+          'Avoid forcefully holding back sneezes, which can create sudden pressure in the ears.',
+          'Avoid vacuuming without a HEPA filter when nasal passages are already sensitized.',
+        ],
+        whenToGetHelp:
+          'Seek medical evaluation if sneezing is accompanied by severe facial sinus pain, fever, continuous nosebleeds, or wheezing.',
       };
     }
 
@@ -220,6 +361,19 @@ export function getHealthGuidance(
           'Use mechanical HEPA filtration in your main sleeping or living quarters.',
           'Consult a physician if coughing produces colored sputum, persists beyond a few days, or is accompanied by fever.',
         ],
+        whyThisMatters:
+          'Inhaled fine particles and reactive oxidants like ozone stimulate bronchial cough receptors. Coughing serves as a protective reflex to expel trapped matter, but persistent coughing requires medical attention to rule out infection or asthma.',
+        doList: [
+          'Reduce strenuous outdoor cardiovascular exercise while air quality is elevated.',
+          'Sip warm fluids to soothe hypersensitive airway cough receptors.',
+          'Run a mechanical HEPA air purifier in living and sleeping spaces.',
+        ],
+        dontList: [
+          'Avoid outdoor cardio workouts near high-traffic or industrial corridors.',
+          'Avoid burning candles, incense, or unvented gas appliances indoors.',
+        ],
+        whenToGetHelp:
+          'Seek prompt medical care if coughing produces blood or rust-colored phlegm, causes chest pain, is accompanied by wheezing, or lasts longer than a week.',
       };
     }
 
@@ -244,6 +398,19 @@ export function getHealthGuidance(
           'Sit upright in a relaxed posture to ease thoracic chest expansion.',
           'Seek medical attention promptly if breathing does not quickly return to baseline comfort.',
         ],
+        whyThisMatters:
+          'Elevated fine particles (PM2.5) and ozone penetrate deep into bronchioles and alveolar tracts, which may contribute to airway constriction and increased breathing effort. Breathing discomfort can indicate acute or chronic cardiovascular or pulmonary conditions requiring clinical evaluation.',
+        doList: [
+          'Stop outdoor physical activity immediately and rest in a filtered, clean indoor room.',
+          'If you have a doctor-prescribed asthma or COPD action plan, follow your prescribed medication instructions.',
+          'Sit upright with relaxed shoulders to facilitate thoracic lung expansion.',
+        ],
+        dontList: [
+          'Do not engage in outdoor exercise or strenuous physical exertion.',
+          'Do not ignore worsening shortness of breath or rely solely on environmental adjustments.',
+        ],
+        whenToGetHelp:
+          'EMERGENCY: Seek immediate emergency medical care (dial 911 / emergency services) if you experience severe shortness of breath, chest pressure, blue lips or fingers, or wheezing unresponsive to prescribed medication.',
       };
     }
 
@@ -266,6 +433,19 @@ export function getHealthGuidance(
           'Avoid crowded roadways, idling diesel vehicles, and scented chemical fumes.',
           'Consult a healthcare provider if headaches are unusually sudden, severe, or recurrent.',
         ],
+        whyThisMatters:
+          'Traffic exhaust, combustion gases, and fine particulates can contribute to sinus congestion, olfactory irritation, and systemic fatigue. Headaches also commonly arise from dehydration, screen strain, hunger, or stress.',
+        doList: [
+          'Drink a full glass of water to ensure systemic hydration.',
+          'Rest in a quiet, dimly lit, well-ventilated indoor room with clean filtered air.',
+          'Apply a cool compress to your forehead or temples.',
+        ],
+        dontList: [
+          'Avoid walking or exercising alongside heavy diesel traffic or idling vehicles.',
+          'Avoid strong artificial fragrances, chemical fumes, or loud environments.',
+        ],
+        whenToGetHelp:
+          'Seek immediate medical care if headache is sudden and unusually severe ("thunderclap"), or accompanied by stiff neck, fever, confusion, weakness, or vision changes.',
       };
     }
 
@@ -286,6 +466,19 @@ export function getHealthGuidance(
           'Rest in a comfortable seated or semi-reclined position.',
           'Seek medical evaluation if nausea is accompanied by high fever, severe abdominal pain, or confusion.',
         ],
+        whyThisMatters:
+          'Exposure to strong exhaust odors, industrial sulfur emissions, or vehicle fumes can trigger olfactory sensory nausea in sensitive individuals. However, nausea predominantly stems from dietary, gastrointestinal, or inner-ear causes rather than ambient air quality.',
+        doList: [
+          'Move away from fuel, vehicle exhaust, or chemical odors into fresh indoor air.',
+          'Sip small amounts of cool water, ginger tea, or electrolyte fluids.',
+          'Rest in a comfortable upright or slightly reclined position.',
+        ],
+        dontList: [
+          'Avoid heavy, greasy, or strongly spiced meals while feeling nauseated.',
+          'Avoid enclosed spaces with vehicle fumes or solvent vapors.',
+        ],
+        whenToGetHelp:
+          'Seek medical evaluation if nausea is accompanied by severe abdominal pain, high fever, inability to retain fluids for 12 hours, or confusion.',
       };
     }
 
@@ -307,6 +500,54 @@ export function getHealthGuidance(
           'Keep hydration levels balanced throughout the day.',
           'Consult a physician if persistent fatigue interferes with your normal daily routines.',
         ],
+        whyThisMatters:
+          'Breathing elevated fine particulates or daytime ozone requires increased metabolic energy for airway clearance and respiratory defense, which may contribute to feelings of lethargy. Fatigue is multifaceted, tied most often to sleep, nutrition, stress, and exertion.',
+        doList: [
+          'Ensure adequate restorative rest in a HEPA-filtered, clean indoor bedroom.',
+          'Schedule physical exertion during cleaner-air hours (typically early morning).',
+          'Maintain balanced hydration throughout the day.',
+        ],
+        dontList: [
+          'Avoid pushing through strenuous workouts outdoors when air pollution is elevated.',
+          'Avoid relying on excessive caffeine, which can worsen dehydration.',
+        ],
+        whenToGetHelp:
+          'Consult a physician if persistent fatigue lasts more than two weeks or is accompanied by chest pain, unexplained weight loss, or shortness of breath.',
+      };
+    }
+
+    case 'Check general exposure on face': {
+      const contributors: string[] = [];
+      if (pm25Elevated || pm10Elevated) contributors.push('Suspended combustion and road particulate matter');
+      if (o3Elevated) contributors.push('Photochemical oxidants and ground-level ozone');
+      if (dustElevated) contributors.push('Coarse dust and resuspension');
+      if (contributors.length === 0) contributors.push('Ambient baseline particulates and environmental micro-pollutants');
+
+      return {
+        title: 'Facial Exposure & Environmental Contact',
+        environmentalExplanation:
+          'Facial skin and mucous membranes have direct, unshielded contact with ambient air. Airborne particles, coarse dust, and oxidants may settle on the skin barrier and ocular tear film, potentially contributing to surface dryness, pore congestion, or minor irritation. A photograph provides observational context and does not prove pollution causation or diagnose clinical disorders.',
+        possibleContributors: contributors,
+        observedPollutantsStatus,
+        actionableSteps: [
+          'Gently cleanse facial skin with a mild, soap-free cleanser after outdoor exposure.',
+          'Apply an antioxidant or barrier moisturizer to help protect exposed skin surfaces.',
+          'Rinse eyes with sterile saline if particulate grittiness is felt.',
+          'Review the Research-Style Analysis for detailed observational and scientific context.',
+        ],
+        whyThisMatters:
+          'Facial skin and mucosal membranes (eyes, nose, lips) have direct unshielded contact with ambient air. Coarse particles, combustion soot, and photochemical smog can settle on the skin barrier and ocular surface, potentially contributing to localized dryness, pore congestion, or surface irritation.',
+        doList: [
+          'Wash face gently with a mild cleanser after returning indoors from outdoor commutes.',
+          'Apply an antioxidant or barrier moisturizer to help seal the stratum corneum.',
+          'Rinse eyes with clean water or sterile saline if particulate grittiness occurs.',
+        ],
+        dontList: [
+          'Avoid scrubbing facial skin abrasively, which can grind particles into the epidermal layer.',
+          'Avoid touching or rubbing face with unwashed hands while in traffic or dusty areas.',
+        ],
+        whenToGetHelp:
+          'Seek medical attention if you develop persistent facial swelling, spreading rash, hives, or painful ocular redness.',
       };
     }
 
@@ -327,6 +568,19 @@ export function getHealthGuidance(
           'Maintain clean indoor air with mechanical HEPA filtration when possible.',
           'Discuss any specific or lingering medical concerns with a licensed healthcare provider.',
         ],
+        whyThisMatters:
+          'Individual sensitivity to ambient air varies based on underlying health, age, and exposure duration. Current air quality provides background context, though personal concerns often involve multiple non-environmental factors.',
+        doList: [
+          'Monitor whether your symptoms correlate with time spent outdoors near high traffic.',
+          'Maintain clean indoor air with mechanical HEPA filtration when possible.',
+          'Discuss your concern with the AI Advisor for detailed interactive reasoning.',
+        ],
+        dontList: [
+          'Avoid assuming ambient pollution is the sole cause of symptoms without medical evaluation.',
+          'Avoid self-medicating with unprescribed medications.',
+        ],
+        whenToGetHelp:
+          'Discuss any specific, severe, or worsening health concerns with a licensed physician.',
       };
     }
 
@@ -348,9 +602,24 @@ export function getHealthGuidance(
           'Ventilate living spaces during afternoon breezy hours when morning thermal inversions have lifted.',
           'Check the 72-hour AI Forecast tab to plan cleaner-air windows for outdoor commitments.',
         ],
+        whyThisMatters:
+          `Current ambient conditions in ${reading.location.name} reflect an AQI of ${aqi} (${category}) with ${reading.dominantPollutant} as primary pollutant. Understanding cumulative exposure helps you adapt activity timing and ventilation to protect overall wellness.`,
+        doList: [
+          aqi > 100
+            ? 'Shift strenuous cardio workouts to indoor filtered spaces.'
+            : 'Enjoy outdoor activities while monitoring peak traffic windows.',
+          'Ventilate living spaces during afternoon breezy hours when morning inversions have lifted.',
+        ],
+        dontList: [
+          'Avoid exercising directly alongside congested roadways or industrial corridors.',
+          'Avoid leaving windows open during high-pollen or high-dust afternoon hours.',
+        ],
+        whenToGetHelp:
+          'Consult a healthcare provider if you develop unexpected respiratory tightness or chest discomfort during regular physical activities.',
       };
     }
 
+    case 'No symptoms / just checking air':
     case 'No symptoms — check air': {
       return {
         title: 'Preventive Air Quality Check',
@@ -371,6 +640,17 @@ export function getHealthGuidance(
           'Keep indoor spaces ventilated with clean filtered air.',
           'Stay hydrated throughout the day to support mucosal defense mechanisms.',
         ],
+        whyThisMatters:
+          'Checking ambient air before outdoor plans helps you maintain optimal respiratory health before airborne irritants accumulate.',
+        doList: [
+          'Check the 72-hour forecast to pick optimal cleaner-air windows for outdoor runs.',
+          'Keep indoor spaces well ventilated with mechanical filtration when outdoor air is dusty.',
+        ],
+        dontList: [
+          'Avoid prolonged heavy exertion next to idling diesel trucks or highway corridors.',
+        ],
+        whenToGetHelp:
+          'Seek medical attention if you ever develop sudden chest tightness, wheezing, or difficulty breathing.',
       };
     }
   }

@@ -95,7 +95,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             onClick={onRefresh}
             className="w-full py-2.5 bg-[#0F766E] hover:bg-[#0F766E]/80 text-white rounded-xl text-xs font-semibold"
           >
-            Retry Sensor Connection
+            Retry Connection
           </button>
           <button
             onClick={onOpenLocationSearch}
@@ -145,8 +145,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
         />
 
         {/* Top Meta: Location Context & Category */}
-        <div className="w-full flex items-center justify-between text-xs text-slate-400">
-          <div className="flex items-center gap-1 text-[11px] font-medium text-slate-300 truncate max-w-[200px]">
+        <div className="w-full flex items-center justify-between text-xs text-slate-400 gap-2">
+          <div
+            className="flex items-center gap-1 text-[11px] font-medium text-slate-300 min-w-0 flex-1"
+            title={`${location.name}${location.admin1 ? `, ${location.admin1}` : ''}, ${location.country}`}
+          >
             <MapPin className="w-3.5 h-3.5 text-[#06B6D4] shrink-0" />
             <span className="truncate">
               {location.name}
@@ -155,7 +158,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </div>
 
           <span
-            className="text-[10px] font-bold uppercase font-mono px-2 py-0.5 rounded-full border"
+            className="text-[10px] font-bold uppercase font-mono px-2 py-0.5 rounded-full border shrink-0"
             style={{
               backgroundColor: categoryBg,
               borderColor: categoryBorder,
@@ -330,18 +333,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <span className="text-xs font-normal text-slate-400">ppm</span>
             </div>
           </div>
-
-          {/* NH3 (Ammonia) - Documented Open-Meteo Air Quality Variable */}
-          <div className="col-span-2 p-3 rounded-2xl bg-[#09212D] border border-[#263238] flex items-center justify-between">
-            <div>
-              <div className="text-xs font-bold text-white">NH₃ (Ammonia)</div>
-              <p className="text-[10px] text-slate-400">Atmospheric ammonia concentration</p>
-            </div>
-            <div className="text-lg font-bold font-mono text-white tabular-nums">
-              {pollutants.nh3 !== null && pollutants.nh3 !== undefined ? pollutants.nh3 : 'N/A'}{' '}
-              <span className="text-xs font-normal text-slate-400">µg/m³</span>
-            </div>
-          </div>
         </div>
       </section>
 
@@ -473,7 +464,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <History className="w-4 h-4" />
             </div>
             <div>
-              <div className="text-xs font-bold text-white">Persistent Archive</div>
+              <div className="text-xs font-bold text-white">See More History</div>
               <div className="text-[10px] text-slate-400">Stored verified readings & export</div>
             </div>
           </div>

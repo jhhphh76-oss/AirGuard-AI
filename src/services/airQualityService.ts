@@ -172,7 +172,6 @@ export const airQualityService = {
         'us_aqi',
         'carbon_dioxide',
         'methane',
-        'ammonia',
       ].join(',');
 
       const currentVars = [
@@ -185,7 +184,6 @@ export const airQualityService = {
         'ozone',
         'dust',
         'uv_index',
-        'ammonia',
       ].join(',');
 
       const url = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&hourly=${hourlyVars}&current=${currentVars}&timezone=auto&forecast_days=5`;
@@ -218,7 +216,7 @@ export const airQualityService = {
 
       const catInfo = getAQICategory(aqiValue);
 
-      // Pollutants: PM10, PM2.5, CO2, CO, NO2, O3, SO2, NH3
+      // Pollutants: PM10, PM2.5, CO2, CO, NO2, O3, SO2
       const pollutants: Pollutants = {
         pm10: current.pm10 !== undefined ? roundOneDec(current.pm10) : roundOneDec(hourly.pm10?.[currentIndex]),
         pm2_5: current.pm2_5 !== undefined ? roundOneDec(current.pm2_5) : roundOneDec(hourly.pm2_5?.[currentIndex]),
@@ -227,7 +225,6 @@ export const airQualityService = {
         no2: current.nitrogen_dioxide !== undefined ? roundOneDec(current.nitrogen_dioxide) : roundOneDec(hourly.nitrogen_dioxide?.[currentIndex]),
         o3: current.ozone !== undefined ? roundOneDec(current.ozone) : roundOneDec(hourly.ozone?.[currentIndex]),
         so2: current.sulphur_dioxide !== undefined ? roundOneDec(current.sulphur_dioxide) : roundOneDec(hourly.sulphur_dioxide?.[currentIndex]),
-        nh3: current.ammonia !== undefined ? roundOneDec(current.ammonia) : roundOneDec(hourly.ammonia?.[currentIndex]),
       };
 
       // Environmental Indicators - strictly separated from pollutants
@@ -316,6 +313,13 @@ export const airQualityService = {
       // - clearly indicate that the latest refresh failed
       // If no previous reading exists:
       // Show a proper unavailable-data state.
+
+      // If explicit manual refresh was requested, throw so the refresh handler detects the failure
+      if (forceRefresh) {
+        throw new Error(
+          apiError?.message || 'Open-Meteo Air Quality request failed. Fresh data could not be retrieved.'
+        );
+      }
 
       const lastKnown = memoryCache.get(cacheKey) || getStoredCache(cacheKey);
       if (lastKnown) {

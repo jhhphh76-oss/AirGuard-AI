@@ -18,6 +18,7 @@ import { locationService } from './services/locationService';
 import { airQualityService } from './services/airQualityService';
 import { healthcareService } from './services/healthcareService';
 import { notificationService } from './services/notificationService';
+import { refreshService, RefreshStatus } from './services/refreshService';
 import { MobileHeader } from './components/Navigation/MobileHeader';
 import { MobileBottomNav } from './components/Navigation/MobileBottomNav';
 import { LocationSearchModal } from './components/Location/LocationSearchModal';
@@ -28,6 +29,7 @@ import { MapView } from './components/Map/MapView';
 import { HealthView } from './components/Health/HealthView';
 import { ForecastView } from './components/Forecast/ForecastView';
 import { HistoryView } from './components/History/HistoryView';
+import { AlertTriangle, X } from 'lucide-react';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<PrimaryNavTab>('home');
@@ -38,7 +40,7 @@ export default function App() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [activeNotification, setActiveNotification] = useState<AQINotification | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(
-    () => notificationService.getSettings().enabled
+    () => notificationService.isEffectiveNotificationsOn()
   );
 
   // Centralized Real Air Quality Data State
@@ -46,7 +48,10 @@ export default function App() {
   const [forecast, setForecast] = useState<HourlyForecastPoint[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshStatus, setRefreshStatus] = useState<RefreshStatus>(() =>
+    refreshService.getStatus()
+  );
+  const [refreshErrorMessage, setRefreshErrorMessage] = useState<string | null>(null);
   const [cacheMinutesRemaining, setCacheMinutesRemaining] = useState(60);
 
   // Real Healthcare Facilities State
@@ -57,27 +62,39 @@ export default function App() {
     const unsubNotif = notificationService.onNotification((notif) => {
       setActiveNotification(notif);
     });
-    const unsubSettings = notificationService.onSettingsChange((s) => {
-      setNotificationsEnabled(s.enabled);
+    const unsubSettings = notificationService.onSettingsChange(() => {
+      setNotificationsEnabled(notificationService.isEffectiveNotificationsOn());
     });
+    const unsubRefresh = refreshService.onStateChange((diag) => {
+      setRefreshStatus(diag.status);
+      if (diag.status === 'failed') {
+        setRefreshErrorMessage(diag.lastRefreshError);
+      } else if (diag.status === 'success') {
+        setRefreshErrorMessage(null);
+      }
+    });
+
     return () => {
       unsubNotif();
       unsubSettings();
+      unsubRefresh();
     };
   }, []);
 
   const loadAirQualityAndHealthcare = useCallback(
     async (loc: LocationData, force = false) => {
-      if (force) {
-        setIsRefreshing(true);
-      } else {
+      if (!force) {
         setIsLoading(true);
       }
       setFetchError(null);
 
+      const startTime = performance.now();
+
       // 1. Fetch Open-Meteo Air Quality
       try {
         const result = await airQualityService.getAirQuality(loc, force);
+        const elapsed = Math.round(performance.now() - startTime);
+
         setReading(result.reading);
         setForecast(result.forecast);
         setCacheMinutesRemaining(
@@ -86,14 +103,24 @@ export default function App() {
 
         // Evaluate real Open-Meteo AQI reading for significant changes/category shifts
         notificationService.evaluateReading(result.reading);
+
+        // Notify refreshService of success if this was an explicit refresh
+        if (force) {
+          refreshService.completeSuccess(result.reading.timestamp, elapsed);
+        }
       } catch (err: any) {
         console.error('Failed to load air quality:', err);
-        setFetchError(
-          err.message || 'Unable to reach Open-Meteo Air Quality API.'
-        );
+        const elapsed = Math.round(performance.now() - startTime);
+        const errorMsg =
+          err?.message || 'Unable to reach Open-Meteo Air Quality API.';
+        setFetchError(errorMsg);
+
+        if (force) {
+          refreshService.completeFailure(errorMsg, elapsed);
+          setRefreshErrorMessage(errorMsg);
+        }
       } finally {
         setIsLoading(false);
-        setIsRefreshing(false);
       }
 
       // 2. Fetch Real Nearby Healthcare Facilities around exact coordinates
@@ -134,7 +161,13 @@ export default function App() {
     locationService.setActiveLocation(loc);
   };
 
+  // Dedicated Manual Refresh Handler with deduplication and state management
   const handleManualRefresh = () => {
+    const canStart = refreshService.startRefresh({
+      latitude: activeLocation.latitude,
+      longitude: activeLocation.longitude,
+    });
+    if (!canStart) return; // Prevent multiple simultaneous refresh requests
     loadAirQualityAndHealthcare(activeLocation, true);
   };
 
@@ -147,11 +180,31 @@ export default function App() {
           activeLocation={activeLocation}
           onOpenLocationSearch={() => setIsLocationModalOpen(true)}
           onRefresh={handleManualRefresh}
-          isRefreshing={isRefreshing}
+          isRefreshing={refreshStatus === 'refreshing'}
+          refreshStatus={refreshStatus}
           cacheMinutesRemaining={cacheMinutesRemaining}
           onOpenSettings={() => setIsSettingsModalOpen(true)}
           notificationsEnabled={notificationsEnabled}
         />
+
+        {/* Clear Refresh Error Banner if manual refresh failed */}
+        {refreshErrorMessage && (
+          <div className="mx-3 mt-1.5 p-2.5 rounded-2xl bg-[#EF4444]/15 border border-[#EF4444]/35 text-[#EF4444] text-xs flex items-center justify-between gap-2 animate-in fade-in shrink-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span className="truncate leading-tight font-medium">
+                {refreshErrorMessage}
+              </span>
+            </div>
+            <button
+              onClick={() => setRefreshErrorMessage(null)}
+              className="text-[#EF4444] hover:text-white p-1 text-xs shrink-0 cursor-pointer"
+              title="Dismiss error message"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Real-time In-App Notification Toast */}
         <NotificationToast
@@ -181,6 +234,7 @@ export default function App() {
           {currentTab === 'map' && reading && (
             <MapView
               reading={reading}
+              forecast={forecast}
               healthcareFacilities={healthcareFacilities}
               onOpenLocationSearch={() => setIsLocationModalOpen(true)}
               onSelectLocation={handleSelectLocation}
@@ -191,6 +245,7 @@ export default function App() {
             <HealthView
               reading={reading}
               facilities={healthcareFacilities}
+              onNavigate={(tab) => setCurrentTab(tab)}
             />
           )}
 
@@ -210,6 +265,8 @@ export default function App() {
         <SettingsModal
           isOpen={isSettingsModalOpen}
           onClose={() => setIsSettingsModalOpen(false)}
+          activeReading={reading}
+          onRefreshTelemetry={handleManualRefresh}
         />
 
         {/* Mobile Location Selector Bottom Sheet */}

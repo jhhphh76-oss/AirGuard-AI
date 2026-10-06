@@ -32,7 +32,7 @@ export const NotificationToast: React.FC<NotificationToastProps> = ({
   const isIncrease = notification.type === 'increase';
 
   return (
-    <div className="absolute top-16 left-3 right-3 z-50 animate-in slide-in-from-top-4 duration-300 pointer-events-auto">
+    <div className="fixed top-16 left-3 right-3 max-w-md mx-auto z-50 animate-in slide-in-from-top-4 duration-300 pointer-events-auto">
       <div
         className={`p-3.5 rounded-2xl shadow-2xl border backdrop-blur-md flex items-start gap-3 transition-all ${
           isImprovement

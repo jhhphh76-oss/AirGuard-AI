@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 @theme {
+  --breakpoint-xs: 380px;
   --color-airguard-charcoal: #263238;
   --color-airguard-midnight: #071A24;
   --color-airguard-teal: #0F766E;

@@ -6,9 +6,11 @@ import {
   HealthcarePoint,
   AIAdvisorResponse,
   ChatMessage,
+  HourlyForecastPoint,
 } from '../../types/airguard';
 import { aiAdvisorService, PRESET_ADVISOR_QUESTIONS } from '../../services/aiAdvisorService';
 import { locationService } from '../../services/locationService';
+import { healthContextService } from '../../services/healthContextService';
 import {
   MapPin,
   Compass,
@@ -33,6 +35,7 @@ import {
 
 interface MapViewProps {
   reading: AQIReading;
+  forecast?: HourlyForecastPoint[];
   healthcareFacilities?: HealthcarePoint[];
   onOpenLocationSearch: () => void;
   onSelectLocation: (location: LocationData) => void;
@@ -40,6 +43,7 @@ interface MapViewProps {
 
 export const MapView: React.FC<MapViewProps> = ({
   reading,
+  forecast = [],
   healthcareFacilities = [],
   onOpenLocationSearch,
   onSelectLocation,
@@ -55,6 +59,7 @@ export const MapView: React.FC<MapViewProps> = ({
 
   // Geolocation loading state
   const [isLocating, setIsLocating] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   // AI Advisor Conversational State (strictly inside Map)
   const [isAdvisorOpen, setIsAdvisorOpen] = useState(true);
@@ -95,6 +100,29 @@ export const MapView: React.FC<MapViewProps> = ({
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [chatMessages, advisorLoading, isAdvisorOpen]);
+
+  // Carry forward Other Concern context from Health section (Requirement 3)
+  useEffect(() => {
+    const healthCtx = healthContextService.getHealthContext();
+    if (healthCtx.selectedSymptom === 'Other concern') {
+      const concernDetail = healthCtx.customConcern ? `("${healthCtx.customConcern}")` : '';
+      setChatMessages((prev) => {
+        const hasConcern = prev.some((m) => m.id.startsWith('concern_entry_'));
+        if (hasConcern) return prev;
+        return [
+          ...prev,
+          {
+            id: `concern_entry_${Date.now()}`,
+            role: 'assistant',
+            text: `I notice you selected **Other concern** ${concernDetail} from the Health section for **${location.name}** (${aqi} US AQI · ${category}, dominant factor: ${dominantPollutant}).\n\nI'm ready to discuss your specific concern and how current air quality and pollutant levels may relate to it. What would you like to know or discuss?`,
+            timestamp: Date.now(),
+            source: 'AirGuard AI',
+          },
+        ];
+      });
+      setIsAdvisorOpen(true);
+    }
+  }, [location.name, aqi, category, dominantPollutant]);
 
   // Initialize Leaflet Map
   useEffect(() => {
@@ -223,11 +251,14 @@ export const MapView: React.FC<MapViewProps> = ({
   // Handle Current Location Detection
   const handleDetectLocation = async () => {
     setIsLocating(true);
+    setLocationError(null);
     try {
       const loc = await locationService.getCurrentBrowserLocation();
       onSelectLocation(loc);
     } catch (err: any) {
-      alert(err.message || 'Unable to retrieve your current location.');
+      console.warn('Geolocation detection error:', err);
+      setLocationError(err.message || 'Unable to retrieve your current location. Check browser settings.');
+      setTimeout(() => setLocationError(null), 5000);
     } finally {
       setIsLocating(false);
     }
@@ -260,7 +291,7 @@ export const MapView: React.FC<MapViewProps> = ({
       }));
 
     try {
-      const resp = await aiAdvisorService.askAdvisor(trimmed, reading, historyTurns);
+      const resp = await aiAdvisorService.askAdvisor(trimmed, reading, historyTurns, forecast);
       const assistantMsg: ChatMessage = {
         id: `assistant_${Date.now()}`,
         role: 'assistant',
@@ -306,12 +337,17 @@ export const MapView: React.FC<MapViewProps> = ({
       <section className="bg-[#09212D] border border-[#263238] rounded-3xl overflow-hidden shadow-2xl relative">
         {/* Map Stage Header HUD */}
         <div className="p-3 border-b border-[#263238] flex items-center justify-between bg-[#071A24]/90 backdrop-blur-md z-10 relative">
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
             <div className="p-1.5 rounded-xl bg-[#0F766E]/20 text-[#06B6D4] border border-[#0F766E]/30 shrink-0">
               <Compass className="w-4 h-4" />
             </div>
-            <div className="min-w-0">
-              <h2 className="text-xs font-bold text-white truncate">{location.name}</h2>
+            <div className="min-w-0 flex-1">
+              <h2
+                className="text-xs font-bold text-white truncate"
+                title={`${location.name}${location.admin1 ? `, ${location.admin1}` : ''}, ${location.country}`}
+              >
+                {location.name}
+              </h2>
               <p className="text-[10px] text-slate-400 font-mono truncate">
                 {location.latitude.toFixed(4)}°, {location.longitude.toFixed(4)}°
               </p>
@@ -341,6 +377,18 @@ export const MapView: React.FC<MapViewProps> = ({
             </button>
           </div>
         </div>
+
+        {locationError && (
+          <div className="px-4 py-2 bg-[#EF4444]/15 border-b border-[#EF4444]/30 text-[11px] text-[#EF4444] flex items-center justify-between animate-in fade-in">
+            <span>{locationError}</span>
+            <button
+              onClick={() => setLocationError(null)}
+              className="text-[#EF4444] hover:text-white ml-2 text-xs cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Real Leaflet Map Viewport */}
         <div className="relative w-full h-[360px]">

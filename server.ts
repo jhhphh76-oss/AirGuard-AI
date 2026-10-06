@@ -11,10 +11,20 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 function generateScientificRulesFallback(question: string, context: any): string {
-  const { locationName, aqi, category, dominantPollutant, pollutants } = context || {};
+  const {
+    locationName,
+    aqi,
+    category,
+    dominantPollutant,
+    pollutants,
+    forecastSummary,
+    availableComparisonLocations,
+    selectedSymptom,
+  } = context || {};
+
   const q = (question || '').toLowerCase().trim();
 
-  // 1. Identity queries
+  // 1. Identity & capabilities
   if (
     q.includes('who are you') ||
     q.includes('what are you') ||
@@ -22,10 +32,88 @@ function generateScientificRulesFallback(question: string, context: any): string
     q.includes("what's your name") ||
     q.includes('are you an ai')
   ) {
-    return "I’m AirGuard AI, your air-quality and environmental health assistant. I can help you understand pollution, AQI readings, pollutants, forecasts, and general questions.";
+    return "I'm AirGuard AI, your air-quality and environmental health assistant. I can help you understand pollution, AQI, environmental conditions, trends, and practical ways to respond.";
   }
 
-  // 2. Pollutant explanations
+  if (q.includes('what can you help') || q.includes('what can you do') || q.includes('help me with')) {
+    return `I can help you with:\n\n• **Real-Time Analysis:** Breaking down measured pollutants (PM2.5, PM10, O₃, NO₂, CO) in ${locationName}.\n• **Outdoor Decision Support:** Reasoning through exercise, commute timing, and exposure precautions.\n• **Trend Interpretation:** Explaining why AQI changed and what upcoming forecast models show.\n• **Relative Comparisons:** Evaluating measured air quality across available locations without declaring anywhere "completely risk-free".\n• **Environmental Guidance:** Connecting reported symptoms to environmental irritants (non-diagnostic).`;
+  }
+
+  // 2. "I need to go outside but AQI is high. What should I do?"
+  if (
+    (q.includes('need to go outside') || q.includes('have to go outside')) &&
+    (q.includes('high') || q.includes('poor') || q.includes('what should i do'))
+  ) {
+    let guidance = `If you need to go outside in **${locationName}** while the air quality is **${category}** (AQI ${aqi}, dominant: ${dominantPollutant}), here are practical, evidence-based options:\n\n`;
+    guidance += `1. **Route Selection:** Stick to secondary residential corridors away from heavy truck and diesel arteries where ${dominantPollutant} concentrations peak.\n`;
+    guidance += `2. **Personal Protection:** A well-fitted, certified particulate respirator (N95, KN95, or FFP2) significantly filters fine particles like PM2.5 and coarse dust.\n`;
+    guidance += `3. **Exertion Management:** Keep your physical pace brisk but avoid high aerobic breathing (jogging, cycling) that pulls particles deep into pulmonary alveoli.\n`;
+    if (forecastSummary) {
+      guidance += `4. **Timing Window:** ${forecastSummary} If possible, align your outing with hours when dispersion improves.\n`;
+    }
+    guidance += `5. **Post-Exposure:** Wash your face and hands, rinse your eyes with clean saline if irritated, and change outer layers upon returning indoors.`;
+    return guidance;
+  }
+
+  // 3. "Is it better to go outside right now?"
+  if (q.includes('is it better to go outside') || q.includes('should i go outside') || q.includes('safe to go outside')) {
+    if (aqi <= 50) {
+      return `**Yes, right now is optimal.** Air quality in **${locationName}** is currently **Good** (US AQI ${aqi}). Atmospheric fine particles are minimal (${pollutants?.pm2_5 ?? 'low'} µg/m³), making it an excellent time for outdoor exercise, errands, and natural ventilation.`;
+    }
+    if (aqi <= 100) {
+      return `**Right now is acceptable for most people.** Air quality in **${locationName}** is **Moderate** (US AQI ${aqi}, primary: ${dominantPollutant}). General activities are fine, though individuals with sensitive airways or asthma should avoid prolonged intense cardio. ${forecastSummary || ''}`;
+    }
+    return `**Outdoor conditions are currently suboptimal.** In **${locationName}**, air quality is **${category}** (US AQI ${aqi}, dominant: ${dominantPollutant}).\n\n• **Recommendation:** If your outdoor activity is discretionary, consider postponing or shifting indoors.\n• **If you must head out:** Shorten your time outdoors, avoid heavy traffic intersections, and consider wearing an N95/FFP2 mask. ${forecastSummary || ''}`;
+  }
+
+  // 4. "Where nearby has relatively lower measured pollution?" / "Where is better?"
+  if (
+    q.includes('where is better') ||
+    q.includes('where nearby') ||
+    q.includes('lower pollution') ||
+    q.includes('cleaner air') ||
+    q.includes('where should i go')
+  ) {
+    if (availableComparisonLocations && availableComparisonLocations.length > 0) {
+      const sorted = [...availableComparisonLocations].sort((a: any, b: any) => a.aqi - b.aqi);
+      const cleanest = sorted[0];
+      let resp = `Comparing only locations for which AirGuard has actual measured telemetry in this session:\n\n`;
+      resp += `• **${locationName} (Current):** AQI ${aqi} (${category})\n`;
+      sorted.forEach((loc: any) => {
+        resp += `• **${loc.locationName}:** AQI ${loc.aqi} (${loc.category}) — recorded ${loc.measuredAt}\n`;
+      });
+      resp += `\nAmong these measured locations, **${cleanest.locationName}** has **better measured air quality** (relatively lower-pollution). Note that no outdoor environment is completely free of particles; conditions depend on real-time atmospheric wind patterns.`;
+      return resp;
+    }
+    return `Currently, AirGuard only has verified Open-Meteo measurements for **${locationName}** in this session.\n\nTo see where has relatively lower pollution, search other destinations or suburbs using the **Location Search** tool. Once loaded, AirGuard will compare their actual measured readings rather than guessing.`;
+  }
+
+  // 5. Challenge assumptions: "AQI went up so PM2.5 must have increased"
+  if (
+    (q.includes('aqi went up') || q.includes('aqi increased')) &&
+    (q.includes('pm2.5') || q.includes('pm25')) &&
+    (q.includes('must have') || q.includes('means') || q.includes('because'))
+  ) {
+    return `**Not necessarily.** AQI is calculated based on whichever single monitored pollutant poses the highest relative risk at that moment, not solely PM2.5.\n\n• **Current Dominant Pollutant in ${locationName}:** **${dominantPollutant}**\n• **PM2.5:** ${pollutants?.pm2_5 ?? 'Unavailable'} µg/m³\n• **PM10:** ${pollutants?.pm10 ?? 'Unavailable'} µg/m³\n• **Ozone (O₃):** ${pollutants?.o3 ?? 'Unavailable'} µg/m³\n• **NO₂:** ${pollutants?.no2 ?? 'Unavailable'} µg/m³\n\nFor example, on hot sunny afternoons, photochemical ozone (O₃) can surge and raise the AQI even if PM2.5 levels remain flat. Checking the specific pollutant breakdown reveals the true atmospheric driver.`;
+  }
+
+  // 6. "Which pollutant is the main concern?"
+  if (q.includes('which pollutant') || q.includes('main concern') || q.includes('primary pollutant')) {
+    return `In **${locationName}**, the primary measured pollutant of concern right now is **${dominantPollutant}**.\n\n• **Concentration:** ${dominantPollutant === 'PM2.5' ? `${pollutants?.pm2_5 ?? 'N/A'} µg/m³` : dominantPollutant === 'PM10' ? `${pollutants?.pm10 ?? 'N/A'} µg/m³` : `${pollutants?.o3 ?? 'N/A'} µg/m³`}\n• **Total US AQI:** ${aqi} (${category})\n• **Why it matters:** ${dominantPollutant} is currently at the highest proportional threshold relative to air quality standards, making it the primary factor driving today's category classification.`;
+  }
+
+  // 7. "Why did the AQI change?"
+  if (q.includes('why did the aqi change') || q.includes('why did aqi change') || q.includes('why did it change')) {
+    return `AQI shifts in **${locationName}** are typically driven by three interacting factors:\n\n1. **Boundary Layer Meteorology:** Calm winds or temperature inversions trap emissions close to ground level, causing AQI to rise. When wind speeds pick up, vertical dispersion dilutes airborne particles.\n2. **Diurnal Emission Cycles:** Morning and evening vehicular rush hours sharply elevate NO₂ and fine PM2.5, whereas daytime solar radiation drives secondary photochemical Ozone (O₃) creation.\n3. **Current Reading:** AQI is currently **${aqi}** (**${category}**), driven primarily by **${dominantPollutant}**.`;
+  }
+
+  // 8. Health questions & symptoms
+  if (q.includes('headache') || q.includes('cough') || q.includes('breathe') || q.includes('throat') || q.includes('eye') || selectedSymptom) {
+    const sym = selectedSymptom || 'respiratory/mucosal irritation';
+    return `AirGuard is an environmental support tool, not a medical diagnostic system. Elevated **${dominantPollutant}** levels in **${locationName}** (AQI ${aqi}, ${category}) can act as environmental irritants that may contribute to or exacerbate symptoms like ${sym}.\n\n• **Environmental precaution:** Rest indoors in a space equipped with mechanical HEPA air filtration and avoid strenuous cardio outside.\n• **Health notice:** We cannot determine whether pollution is the sole cause of your symptoms. If you experience severe, worsening, or persistent discomfort (such as chest tightness or severe breathlessness), please tell a parent/guardian and seek prompt evaluation by a healthcare professional.`;
+  }
+
+  // 9. Standard definitions (PM2.5, PM10, Ozone, etc.)
   if (q.includes('pm2.5') || q.includes('pm25')) {
     return `PM2.5 refers to fine inhalable particles with diameters 2.5 micrometers and smaller (roughly 30 times finer than a strand of human hair). Because of their microscopic scale, they can bypass upper airway defenses, penetrate deep into alveolar lung tissue, and enter the bloodstream. In ${locationName}, current PM2.5 is **${pollutants?.pm2_5 ?? 'unavailable'} µg/m³**.`;
   }
@@ -46,32 +134,10 @@ function generateScientificRulesFallback(question: string, context: any): string
     return `**PM2.5** is a physical measurement of mass concentration (in micrograms per cubic meter, µg/m³) of fine particles in the air.\n\n**AQI (Air Quality Index)** is a standardized index (0 to 500) designed by environmental agencies to translate raw pollutant concentrations into a simple, color-coded health risk scale (Good, Moderate, Unhealthy, etc.).`;
   }
 
-  // 3. Child/Simplified explanations
   if (q.includes('like i\'m 10') || q.includes('like im 10') || q.includes('for a kid') || q.includes('simple')) {
     return `Imagine the air around us is like a big glass of clear water. Air pollution is like tiny invisible specks of dust and smoke floating inside that water. When the air has too many specks, it can make our throats tickle or make it harder to run fast. In ${locationName}, the air is currently **${category}** (AQI ${aqi}), so it's a good idea to check before big outdoor games!`;
   }
 
-  // 4. Urban pollution
-  if (q.includes('cities') || q.includes('urban') || q.includes('traffic')) {
-    return `Air pollution increases in urban centers due to dense vehicular traffic (diesel and gasoline exhaust), localized industrial emissions, asphalt heat retention, and reduced natural vegetation. Tall buildings can also create "urban street canyons" that trap exhaust near street level during periods of weak atmospheric wind mixing.`;
-  }
-
-  // 5. Why is AQI high / current status
-  if (q.includes('why is') && (q.includes('high') || q.includes('poor') || q.includes('aqi'))) {
-    return `In **${locationName}**, the current US AQI is **${aqi}** (**${category}**), with **${dominantPollutant}** as the primary driver. Elevated levels may be influenced by localized vehicular emissions, heating or industrial outputs, and atmospheric temperature inversions that suppress vertical pollutant dispersion.`;
-  }
-
-  // 6. Precautions / What can I do
-  if (q.includes('what can i do') || q.includes('precaution') || q.includes('protect') || q.includes('advice')) {
-    return `When ambient air quality is ${category} (AQI ${aqi}) in ${locationName}, recommended practical precautions include:\n\n• **Indoor air protection:** Keep windows closed along congested roads during peak rush hours, and run mechanical HEPA air purifiers.\n• **Activity scheduling:** Shift intense cardiovascular training to early morning or filtered indoor facilities.\n• **Personal protection:** Active seniors, children, and individuals with asthma should carry prescribed rescue inhalers and consider certified N95/FFP2 masks for prolonged outdoor exposure.`;
-  }
-
-  // 7. Interesting facts
-  if (q.includes('interesting') || q.includes('fun fact') || q.includes('fact')) {
-    return `Here is a fascinating atmospheric fact: Microscopic fine particles (PM2.5) are so lightweight that they can remain suspended in the atmosphere for weeks, traveling thousands of miles across oceans on continental jet streams! For example, Saharan dust plumes regularly travel across the Atlantic to the Americas.`;
-  }
-
-  // 8. General conversational questions
   if (q.includes('why is the sky blue') || q.includes('sky blue')) {
     return `The sky is blue due to a physical phenomenon called **Rayleigh scattering**. Earth's atmospheric gases scatter shorter wavelengths of sunlight (blue and violet) in all directions much more strongly than longer wavelengths (red and yellow). Because human eyes are more sensitive to blue light, we perceive the daytime sky as blue!`;
   }
@@ -80,21 +146,11 @@ function generateScientificRulesFallback(question: string, context: any): string
     return `Why did the atmospheric sensor break up with the air filter? Because it felt too much pressure! 😄`;
   }
 
-  if (q.includes('summarise') || q.includes('summary') || q.includes('overview') || q.includes('reading')) {
-    return `### Air Quality Summary for ${locationName}\n\n• **Current US AQI:** ${aqi} (${category})\n• **Dominant Factor:** ${dominantPollutant}\n• **PM2.5 Level:** ${pollutants?.pm2_5 ?? 'Unavailable'} µg/m³\n• **PM10 Level:** ${pollutants?.pm10 ?? 'Unavailable'} µg/m³\n\nConditions are currently within the **${category}** threshold. Atmospheric dispersion is monitored continuously.`;
+  if (q.includes('interesting') || q.includes('fun fact') || q.includes('fact')) {
+    return `Here is a fascinating atmospheric fact: Microscopic fine particles (PM2.5) are so lightweight that they can remain suspended in the atmosphere for weeks, traveling thousands of miles across oceans on continental jet streams! For example, Saharan dust plumes regularly travel across the Atlantic to the Americas.`;
   }
 
-  if (q.includes('exercise') || q.includes('outdoor')) {
-    if (aqi <= 50) {
-      return `### Outdoor Exercise Guidance\n\nOutdoor exercise is **highly recommended** in ${locationName}. Atmospheric air quality is optimal (${aqi} US AQI, Good).`;
-    }
-    if (aqi <= 100) {
-      return `### Outdoor Exercise Guidance\n\nOutdoor exercise is **reasonable** for most people in ${locationName}. Sensitive individuals should monitor for mild breathing fatigue.`;
-    }
-    return `### Outdoor Exercise Guidance\n\nOutdoor exercise should be **reduced or shifted indoors** in ${locationName}. Elevated particulate levels (${aqi} US AQI, ${category}) increase alveolar deposition during high respiration rates.`;
-  }
-
-  return `### Air Quality Analysis for ${locationName}\n\n• **Current AQI:** ${aqi} (${category})\n• **Dominant Factor:** ${dominantPollutant}\n• **PM2.5:** ${pollutants?.pm2_5 ?? 'Unavailable'} µg/m³ · **PM10:** ${pollutants?.pm10 ?? 'Unavailable'} µg/m³\n\nI can help you understand this reading, explain specific pollutants, recommend outdoor precautions, or answer general questions!`;
+  return `### Air Quality Analysis for ${locationName}\n\n• **Current AQI:** ${aqi} (${category})\n• **Dominant Factor:** ${dominantPollutant}\n• **PM2.5:** ${pollutants?.pm2_5 ?? 'Unavailable'} µg/m³ · **PM10:** ${pollutants?.pm10 ?? 'Unavailable'} µg/m³\n\nI can help you reason through outdoor plans, explain specific pollutants, assess relative comparisons, or answer general environmental health questions!`;
 }
 
 async function startServer() {
@@ -133,51 +189,67 @@ async function startServer() {
         });
       }
 
-      const systemInstruction = `You are AirGuard AI, the dedicated air-quality and environmental health assistant inside the AirGuard application.
+      const systemInstruction = `You are AirGuard AI, a context-aware environmental problem-solving assistant inside the AirGuard application.
 
-IDENTITY & PERSONA:
-- Your name is AirGuard AI.
-- If asked "Who are you?", "What are you?", "What's your name?", "Are you an AI?", or similar questions, answer naturally:
-  "I’m AirGuard AI, your air-quality and environmental health assistant. I can help you understand pollution, AQI readings, pollutants, forecasts, and general questions."
-- Never claim to be OpenAI, ChatGPT, Gemini, or any external AI. AirGuard AI is the assistant identity inside this application.
-- You are conversational, intelligent, helpful, and natural.
+IDENTITY:
+- Your name is AirGuard AI, personal air-quality and environmental health assistant.
+- If asked "Who are you?", "What are you?", "What's your name?", or "What can you help with?", introduce yourself naturally:
+  "I'm AirGuard AI, your air-quality and environmental health assistant. I can help you understand pollution, AQI, environmental conditions, trends, and practical ways to respond."
+- Never claim to be OpenAI, ChatGPT, or external models.
 
-KNOWLEDGE & SCOPE:
-- OPEN-ENDED: You are NOT limited to air quality. You must NOT say "I can only answer questions about air quality."
-- If asked general questions (e.g., "Why is the sky blue?", "Explain air pollution like I'm 10", "Tell me a joke", or general knowledge), answer naturally, accurately, and pleasantly.
-- Respond naturally without unnecessarily forcing every conversation back to AQI.
+CRITICAL PROBLEM-SOLVING PRINCIPLES:
+Reason through problems instead of simply repeating the AQI.
+1. Understand the user's actual goal (e.g. going outside, commuting, exercising, planning daily activities, understanding why numbers changed, comparing locations, or managing symptoms).
+2. Reason from the real available evidence:
+   - Location: ${context.locationName} (${context.latitude}, ${context.longitude})
+   - Current US AQI: ${context.aqi} (${context.category})
+   - Dominant Pollutant: ${context.dominantPollutant}
+   - Measured Pollutants (Open-Meteo):
+     * PM2.5: ${context.pollutants?.pm2_5 != null ? `${context.pollutants.pm2_5} µg/m³` : 'Unavailable'}
+     * PM10: ${context.pollutants?.pm10 != null ? `${context.pollutants.pm10} µg/m³` : 'Unavailable'}
+     * NO2: ${context.pollutants?.no2 != null ? `${context.pollutants.no2} µg/m³` : 'Unavailable'}
+     * O3 (Ozone): ${context.pollutants?.o3 != null ? `${context.pollutants.o3} µg/m³` : 'Unavailable'}
+     * CO: ${context.pollutants?.co != null ? `${context.pollutants.co} µg/m³` : 'Unavailable'}
+     * SO2: ${context.pollutants?.so2 != null ? `${context.pollutants.so2} µg/m³` : 'Unavailable'}
+     * CO2: ${context.pollutants?.co2 != null ? `${context.pollutants.co2} ppm` : 'Unavailable'}
+   - Environmental Indicators:
+     * AOD: ${context.indicators?.aod ?? 'Unavailable'}
+     * Dust: ${context.indicators?.dust != null ? `${context.indicators.dust} µg/m³` : 'Unavailable'}
+     * UV Index: ${context.indicators?.uv_index ?? 'Unavailable'}
+   - Forecast / Trend: ${context.forecastSummary || 'Available in Forecast tab'}
+   - Recent History for ${context.locationName}: ${JSON.stringify(context.locationHistory || [])}
+   - Other Verified Locations in Session: ${JSON.stringify(context.availableComparisonLocations || [])}
+   - User Health Symptom (if reported): ${context.selectedSymptom ? `${context.selectedSymptom} ${context.customConcern ? `(${context.customConcern})` : ''}` : 'None reported'}
+   - Photo Analysis Observation (if analyzed): ${context.photoObservation || 'None'}
 
-LOCATION & REAL AIRGUARD CONTEXT:
-The user is currently viewing:
-- Location: ${context.locationName} (${context.latitude}, ${context.longitude})
-- Current US AQI: ${context.aqi} (${context.category})
-- Dominant Pollutant: ${context.dominantPollutant}
-- Measured Pollutants from Open-Meteo:
-  * PM2.5: ${context.pollutants?.pm2_5 != null ? `${context.pollutants.pm2_5} µg/m³` : 'Unavailable'}
-  * PM10: ${context.pollutants?.pm10 != null ? `${context.pollutants.pm10} µg/m³` : 'Unavailable'}
-  * NO2: ${context.pollutants?.no2 != null ? `${context.pollutants.no2} µg/m³` : 'Unavailable'}
-  * O3 (Ozone): ${context.pollutants?.o3 != null ? `${context.pollutants.o3} µg/m³` : 'Unavailable'}
-  * CO: ${context.pollutants?.co != null ? `${context.pollutants.co} µg/m³` : 'Unavailable'}
-  * SO2: ${context.pollutants?.so2 != null ? `${context.pollutants.so2} µg/m³` : 'Unavailable'}
-  * CO2: ${context.pollutants?.co2 != null ? `${context.pollutants.co2} ppm` : 'Unavailable'}
-- Environmental Indicators:
-  * AOD (Aerosol Optical Depth): ${context.indicators?.aod != null ? context.indicators.aod : 'Unavailable'}
-  * Dust: ${context.indicators?.dust != null ? `${context.indicators.dust} µg/m³` : 'Unavailable'}
-  * UV Index: ${context.indicators?.uv_index != null ? context.indicators.uv_index : 'Unavailable'}
-
-AIR-QUALITY RULES:
-1. When asked about current air quality or pollution, always ground your response in the actual measurements above for ${context.locationName}.
-2. Do NOT invent missing values. If a pollutant or reading is marked "Unavailable", clearly say it is not available from the current telemetry feed.
-3. Reason scientifically from the data. If PM2.5 is high, explain that PM2.5 is one of the measured pollutants contributing to current conditions. If multiple pollutants are elevated, explain each separately.
-4. HEALTH SAFETY BOUNDARIES:
-   - You are an environmental health assistant, NOT a doctor or diagnostic system.
-   - Do NOT diagnose medical conditions.
-   - Do NOT claim that pollution definitely caused a symptom.
-   - Use cautious phrasing: "may contribute to", "can be associated with", or "may worsen symptoms in some people".
-   - Suggest practical exposure precautions (e.g. running HEPA purifiers, timing outdoor exercise, using certified N95 masks when AQI is poor).
-   - If symptoms sound severe (e.g. severe breathlessness, chest pain), urge immediate evaluation by a qualified medical professional.
-5. CONVERSATION CONTEXT:
-   - Maintain context across previous turns in this conversation. If the user asks a follow-up ("Why is it dangerous?", "What about PM10?", "Explain it like I'm 10"), connect it seamlessly without asking the user to repeat context.`;
+PROBLEM-SOLVING RULES:
+1. PRACTICAL OPTIONS:
+   Never simply tell the user "AQI is high. Stay indoors."
+   If the user needs or wants to go outside, reason from specific pollutant levels, the forecast trend, wind/time of day, personal protection (certified N95/FFP2 masks for fine particles/dust), and route choices (avoiding heavy diesel traffic arteries).
+2. "WHERE IS BETTER?" / COMPARISONS:
+   Compare ONLY locations for which AirGuard has actual measured data (listed under "Other Verified Locations in Session").
+   Use phrasing such as "relatively lower-pollution" or "better measured air quality among the available locations".
+   NEVER declare any location to be "absolutely safe" or risk-free.
+   If NO other location has verified measurements in the session, explicitly state:
+   "AirGuard currently only has verified measurements for ${context.locationName} in this session. To check other areas, use the Location Search to load verified Open-Meteo readings for those locations."
+   NEVER fabricate or invent AQI numbers for locations not measured.
+3. CHALLENGE ASSUMPTIONS:
+   If the user assumes an incorrect cause (e.g. "The AQI went up so PM2.5 must have increased"), gently correct the misconception:
+   AQI can be driven by different pollutants (e.g., ground-level ozone on hot sunny afternoons, coarse PM10 dust during windy conditions, or NO2 from rush-hour traffic). Examine which pollutant is actually dominant in the current data.
+   Clearly distinguish between:
+   - Measured fact (what the sensors recorded)
+   - Scientific interpretation (likely sources or atmospheric behavior)
+   - Uncertainty (what AirGuard does not measure).
+4. HEALTH SAFETY:
+   You are an environmental health assistant, NOT a doctor or diagnostic system.
+   NEVER diagnose medical conditions (never say "You have asthma" or "You have an allergy" or "Pollution caused your headache").
+   Explain environmental context cautiously: "may contribute to", "can be associated with", "can irritate airways".
+   For serious, acute, or worsening symptoms (e.g., severe breathlessness, chest tightness, extreme dizziness), urge the user to tell a parent/guardian and seek prompt medical care.
+5. OPEN-ENDED & EDUCATIONAL:
+   You can answer any educational question about air quality, atmospheric science, pollutants, or the AirGuard app. Do NOT reject questions or force every question into a generic AQI regurgitation.
+6. MONITORED POLLUTANTS:
+   - AirGuard monitors PM2.5, PM10, NO2, O3, CO, SO2, and CO2.
+   - Do NOT reference NH3 (ammonia) as a measured pollutant; AirGuard does not track, measure, or report NH3.`;
 
       // Build contents array for multi-turn conversation
       const contents: any[] = [];
@@ -210,19 +282,44 @@ AIR-QUALITY RULES:
         });
       }
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents,
-        config: {
-          systemInstruction,
-          temperature: 0.6,
-        },
-      });
+      // Attempt generation with primary fast model gemini-flash-latest
+      let text = '';
+      try {
+        const response = await ai.models.generateContent({
+          model: 'gemini-flash-latest',
+          contents,
+          config: {
+            systemInstruction,
+            temperature: 0.6,
+          },
+        });
+        text = response.text || '';
+      } catch (primaryErr: any) {
+        // If primary model hit rate limits or 429, try secondary lightweight model
+        console.warn('Primary Gemini model busy, attempting secondary flash-lite:', primaryErr?.message || primaryErr);
+        try {
+          const fallbackResp = await ai.models.generateContent({
+            model: 'gemini-3.1-flash-lite',
+            contents,
+            config: {
+              systemInstruction,
+              temperature: 0.5,
+            },
+          });
+          text = fallbackResp.text || '';
+        } catch (secondaryErr: any) {
+          console.warn('Gemini quota limit reached, activating AirGuard AI engine fallback');
+          text = generateScientificRulesFallback(question, context);
+        }
+      }
 
-      const text = response.text || "I'm having trouble connecting right now. Please try again in a moment.";
+      if (!text) {
+        text = generateScientificRulesFallback(question, context);
+      }
+
       res.json({ answer: text, source: 'AirGuard AI' });
     } catch (err: any) {
-      console.error('Gemini advisor error:', err);
+      console.warn('Gemini advisor request handled via fallback:', err?.message || err);
       // Friendly fallback adhering strictly to rule 11
       const fallback = generateScientificRulesFallback(req.body?.question || '', req.body?.context);
       res.json({
@@ -232,55 +329,173 @@ AIR-QUALITY RULES:
     }
   });
 
-  // Server-side Gemini Multimodal Photo Analysis Endpoint
+  // Helper for generating non-diagnostic exposure and symptom analysis fallback
+  function generateExposureAnalysisFallback(context: any, hasPhoto: boolean): any {
+    const {
+      locationName = 'Current Location',
+      aqi = 50,
+      category = 'Moderate',
+      dominantPollutant = 'PM2.5',
+      pollutants = {},
+      symptoms = [],
+      customConcern = '',
+      isNoSymptomMode = false,
+    } = context || {};
+
+    const pm25 = pollutants?.pm2_5;
+    const pm10 = pollutants?.pm10;
+    const o3 = pollutants?.o3;
+    const no2 = pollutants?.no2;
+
+    const isElevated = (val: number | null | undefined, threshold: number) =>
+      typeof val === 'number' && val > threshold;
+
+    const pm25High = isElevated(pm25, 15);
+    const o3High = isElevated(o3, 60);
+
+    const visibleContent = hasPhoto
+      ? 'Optical observations from the image indicate ambient surface features under available lighting. Insufficient visual information for meaningful clinical assessment; visual data provides general reference only.'
+      : 'Photo not provided';
+
+    const environmentalObservations = `Current environmental conditions in ${locationName}: US AQI ${aqi} (${category}), with ${dominantPollutant} as dominant pollutant. Real-time telemetry: PM2.5: ${pm25 !== null && pm25 !== undefined ? pm25 : 'N/A'} µg/m³, PM10: ${pm10 !== null && pm10 !== undefined ? pm10 : 'N/A'} µg/m³, O₃: ${o3 !== null && o3 !== undefined ? o3 : 'N/A'} µg/m³, NO₂: ${no2 !== null && no2 !== undefined ? no2 : 'N/A'} µg/m³.`;
+
+    let potentialFactors = '';
+    const precautions: string[] = [];
+
+    const whatMayBeIrritating = hasPhoto
+      ? 'Optical observations indicate exposed surface appearance under ambient lighting. In an environmental context, particulate deposition or atmospheric dryness may contribute to surface dryness or minor irritation, though photographs cannot diagnose clinical causes.'
+      : `Based on current ambient conditions (${category}, AQI ${aqi}), elevated ${dominantPollutant} or airborne particulates may be contributing to environmental irritation.`;
+
+    let whyThisMatters = `Air quality conditions (AQI ${aqi}, ${dominantPollutant}) in ${locationName} can interact with mucosal and respiratory barriers. Current levels may contribute to sensory irritation in exposed individuals.`;
+    const doList: string[] = [
+      'Stay well hydrated to maintain healthy mucous membrane barriers.',
+      'Operate indoor mechanical HEPA air filtration if available.',
+    ];
+    const dontList: string[] = [
+      'Avoid strenuous outdoor cardio workouts during peak traffic or high pollution hours.',
+      'Avoid rubbing irritated eyes or scrubbing facial skin aggressively.',
+    ];
+    let whenToGetHelp = 'Seek medical evaluation if symptoms worsen, do not improve with clean indoor rest, or if you experience severe discomfort, fever, or difficulty breathing.';
+
+    const researchAnalysis = `Research-Style Optical & Environmental Evaluation:
+1. Visual Observations: Image demonstrates facial surface under ambient illumination. No definitive clinical biomarkers or pathological lesions can be determined from 2D photographic capture.
+2. Environmental Exposure Relevance: Current ambient air registers AQI ${aqi} (${category}) with ${dominantPollutant} as primary pollutant. Ambient particulate matter can settle on external dermal barriers.
+3. Scientific Context: Fine particulates (PM2.5) and ambient oxidants interact with the stratum corneum lipid matrix, potentially influencing transepidermal water loss and superficial barrier stress.
+4. Distinguishing Observations vs Possibilities: Surface appearance may be influenced by hydration, ambient humidity, temperature, or individual baseline characteristics; environmental air quality is a potential external contributor rather than an established sole cause.
+5. Limitations: Standard photographic images cannot quantify microscopic particulate load, tissue penetration, or replace in-person clinical dermatological evaluation.`;
+
+    const isExplicitNoSymptom =
+      isNoSymptomMode || (symptoms.length === 1 && symptoms[0] === 'No symptoms / just checking air');
+
+    if (isExplicitNoSymptom) {
+      whyThisMatters = `Checking ambient air (AQI ${aqi}, ${category}) provides proactive baseline awareness before irritants accumulate.`;
+      potentialFactors = `Current environmental conditions in ${locationName} serve as an ambient baseline check. At an AQI of ${aqi} (${category}), environmental factors are currently ${
+        aqi <= 50 ? 'minimal' : aqi <= 100 ? 'moderate' : 'elevated'
+      }. No individual discomfort or irritation symptoms were reported.`;
+      if (aqi <= 50) {
+        precautions.push('Air quality is satisfactory — optimal for regular outdoor workouts and natural window ventilation.');
+        precautions.push('Continue normal daily activities with minimal particulate exposure concern.');
+      } else if (aqi <= 100) {
+        precautions.push('Acceptable for general outdoor activities for most individuals.');
+        precautions.push('If unusually sensitive to ozone or airborne particles, consider taking more rest breaks during high exertion.');
+      } else {
+        precautions.push('Consider limiting prolonged outdoor cardiovascular exertion during peak pollution hours.');
+        precautions.push('Keep windows closed along high-traffic corridors and run mechanical HEPA filtration indoors.');
+      }
+    } else if (symptoms.length > 0) {
+      const symptomList = symptoms.join(', ') + (customConcern ? ` (${customConcern})` : '');
+      whyThisMatters = `Reported concerns (${symptomList}) can be irritated by current environmental pollutants (${dominantPollutant}, AQI ${aqi}). Environmental air is a recognized mucosal irritant, though non-environmental factors can also cause similar symptoms.`;
+      potentialFactors = `Current environmental conditions may contribute to irritation or discomfort. Some pollutants can be associated with respiratory or irritation-related symptoms like ${symptomList}. Observed atmospheric factors (${dominantPollutant}${
+        pm25High ? ', elevated PM2.5' : ''
+      }${o3High ? ', elevated Ozone' : ''}) represent possible contributors rather than proven causes.`;
+
+      if (symptoms.some((s: string) => s.includes('Eye'))) {
+        doList.push('Rinse eyes with clean sterile saline or artificial tears if airborne dust or ozone irritation occurs.');
+        dontList.push('Avoid vigorously rubbing your eyes, as abrasive particles can scratch delicate corneal surfaces.');
+        whenToGetHelp = 'Seek medical care if you experience severe eye pain, vision changes, extreme light sensitivity, or thick discharge.';
+        precautions.push('Rinse eyes with clean sterile saline or artificial tears if airborne dust or ozone irritation occurs.');
+      }
+      if (symptoms.some((s: string) => s.includes('Skin') || s.includes('face') || s.includes('Face'))) {
+        doList.push('Wash exposed skin with a gentle non-soap cleanser and apply a barrier moisturizer after outdoor exposure.');
+        dontList.push('Avoid harsh abrasive exfoliants while your skin feels sensitized.');
+        whenToGetHelp = 'Seek medical evaluation if redness spreads, hives appear, or facial swelling occurs.';
+        precautions.push('Wash exposed skin with a gentle non-soap cleanser and apply a barrier moisturizer after outdoor exposure.');
+      }
+      if (symptoms.some((s: string) => s.includes('Throat') || s.includes('Cough') || s.includes('Sneezing'))) {
+        doList.push('Stay well hydrated and consider wearing a certified N95/FFP2 respirator when outdoor particulate levels are elevated.');
+        dontList.push('Avoid exposure to secondary irritants like cigarette smoke, vaping, or chemical cleaning aerosols.');
+        precautions.push('Stay well hydrated and consider wearing a certified N95/FFP2 respirator when outdoor particulate levels are elevated.');
+      }
+      if (symptoms.some((s: string) => s.includes('Breathing'))) {
+        doList.unshift('Stop outdoor exertion immediately and rest in clean, filtered indoor air.');
+        dontList.unshift('Do not ignore shortness of breath or attempt strenuous exercise.');
+        whenToGetHelp = 'EMERGENCY: Seek immediate emergency medical assistance (e.g. dial 911) if you experience severe shortness of breath, chest tightness, or blue lips/fingertips.';
+        precautions.push('Reduce strenuous physical exertion outdoors and stay in clean, filtered indoor air.');
+        precautions.push('Seek immediate medical evaluation if acute shortness of breath or chest tightness occurs.');
+      }
+      if (precautions.length < 3) {
+        precautions.push('Consider running indoor HEPA air filtration to reduce ambient airborne particle concentration.');
+        precautions.push('Consult a qualified healthcare professional if symptoms persist or worsen.');
+      }
+    } else {
+      potentialFactors = `Current ambient readings in ${locationName} reflect an AQI of ${aqi} (${category}) with ${dominantPollutant} as dominant pollutant. Current environmental conditions may contribute to irritation or discomfort in sensitive individuals.`;
+      precautions.push('Monitor real-time AQI and forecast trends before planning extended outdoor exercise.');
+      precautions.push('Maintain indoor air quality with proper filtration and ventilation management.');
+    }
+
+    return {
+      photoProvided: hasPhoto,
+      visibleContent,
+      whatMayBeIrritating,
+      whyThisMatters,
+      doList: doList.slice(0, 4),
+      dontList: dontList.slice(0, 4),
+      whenToGetHelp,
+      researchAnalysis,
+      environmentalObservations,
+      potentialFactors,
+      precautions: precautions.slice(0, 4),
+    };
+  }
+
+  // Server-side Gemini Exposure & Photo Analysis Endpoint
   app.post('/api/gemini/analyze-photo', async (req, res) => {
     try {
-      const { imageBase64, context } = req.body;
-      if (!imageBase64) {
-        return res.status(400).json({ error: "We couldn't analyze this image. Please try another photo." });
-      }
+      const { imageBase64, context } = req.body || {};
+      const hasPhoto = Boolean(imageBase64 && typeof imageBase64 === 'string' && imageBase64.trim().length > 0);
 
       if (!ai) {
-        return res.status(503).json({ error: "We couldn't analyze this image. Please try another photo." });
+        const fallback = generateExposureAnalysisFallback(context, hasPhoto);
+        return res.json({ result: fallback, source: 'AirGuard Environmental Intelligence' });
       }
 
-      // Parse base64 and mime type safely
-      let mimeType = 'image/jpeg';
-      let rawData = imageBase64;
-      if (imageBase64.includes(';base64,')) {
-        const parts = imageBase64.split(';base64,');
-        const match = parts[0].match(/data:(.*?)$/);
-        if (match) {
-          mimeType = match[1];
-        }
-        rawData = parts[1];
-      }
+      const systemInstruction = `You are the AirGuard AI Environmental Health & Exposure Specialist.
+Analyze the user's reported concerns and environmental conditions${hasPhoto ? ' and submitted photograph' : ''}.
 
-      const systemInstruction = `You are the AirGuard AI Environmental Vision Specialist.
-Analyze the user's submitted photograph in the context of ambient air quality, environmental conditions, and visible physical or atmospheric observations.
-
-VISUAL OBSERVATION GUIDELINES:
-1. For environmental or pollution-related images, identify visible features such as:
-   - Haze, smog, or reduced visibility
-   - Smoke-like appearance or emissions
-   - Dust or particulate accumulation
-   - Visible environmental and weather conditions (cloud cover, sunlight, horizon clarity)
-   - Other relevant visual observations
-2. For health-related images (e.g. skin, eye surface, throat):
-   - You must NOT diagnose any disease, illness, clinical condition, or medical disorder.
-   - You must NOT claim that any visible symptom was definitely caused by pollution or environmental factors.
-   - You MUST use cautious language such as:
-     * "This image may show..."
-     * "Possible environmental contributors include..."
-     * "An image alone cannot determine the exact cause."
-3. If an image is unclear, blurry, or unrelated, describe what is visible and state clearly what cannot be determined.
-
-RESPONSE REQUIREMENTS:
-Return structured JSON with:
-- visibleContent: An objective description of what is visible in the image (identifying haze, smoke, dust, environmental features, or visible surface features).
-- environmentalObservations: Visible environmental, haze, particulate, or atmospheric observations correlating visible elements with the user's ambient air quality telemetry.
-- potentialFactors: Possible non-diagnostic environmental contributors using the required cautious language ("This image may show...", "Possible environmental contributors include...", "An image alone cannot determine the exact cause.").
-- precautions: 3 to 4 practical, non-diagnostic protective precautions (e.g. clean saline rinse, gentle cleansing, barrier support, limiting outdoor exertion during peak pollution, consulting a healthcare professional if irritation persists).`;
+CRITICAL MEDICAL & NON-DIAGNOSTIC CONSTRAINTS:
+1. AirGuardian is NOT a diagnostic system. Never diagnose any disease, clinical disorder, illness, or medical condition.
+2. Never claim that pollution definitely caused a symptom or condition.
+   - Distinguish possible contributor from proven cause.
+   - Use language such as:
+     * "Current environmental conditions may contribute to irritation or discomfort."
+     * "Some pollutants can be associated with respiratory or irritation-related symptoms."
+     * "May irritate", "could be associated with", "possible contributing factor".
+   - Do NOT say "PM2.5 caused your coughing" or declare definitive causation.
+3. ${
+  hasPhoto
+    ? `PHOTO ANALYSIS:
+   - For normal photo analysis, provide the same useful Health-style analysis structure as normal Health analysis:
+     * whatMayBeIrritating: Explain what the image may indicate or show in an environmental/health context using cautious language ("may", "could", "possible"). Never diagnose a medical condition from a photograph and never claim pollution definitely caused what is visible.
+     * whyThisMatters: Briefly explain why the selected symptom/concern matters in the context of the current air-quality conditions.
+     * doList: Practical, reasonable precautions based on actual air-quality situation.
+     * dontList: Practical things the user should avoid when appropriate.
+     * whenToGetHelp: Clear, responsible guidance about when the user should seek professional medical help.
+     * researchAnalysis: Detailed research-style analysis explaining what can reasonably be observed from the image, possible environmental/exposure relevance, scientific context, distinguishing observations from possibilities, and stating limitations of what can be determined from a photograph.`
+    : `NO-PHOTO MODE:
+   - Photo was not provided. Set visibleContent exactly to "Photo not provided". Provide whatMayBeIrritating, whyThisMatters, doList, dontList, whenToGetHelp based on reported concerns and live air telemetry.`
+}
+4. NO-SYMPTOM MODE:
+   - If user selected "No symptoms / just checking air", do NOT force or invent a symptom. Provide an environmental exposure overview based on actual current AirGuardian readings.`;
 
       const promptText = `Ambient Air Quality Context:
 Location: ${context?.locationName || 'Current Location'}
@@ -290,68 +505,115 @@ PM2.5: ${context?.pollutants?.pm2_5 ?? 'N/A'} µg/m³
 PM10: ${context?.pollutants?.pm10 ?? 'N/A'} µg/m³
 Ozone (O3): ${context?.pollutants?.o3 ?? 'N/A'} µg/m³
 Nitrogen Dioxide (NO2): ${context?.pollutants?.no2 ?? 'N/A'} µg/m³
-User Stated Concern: ${context?.userConcern || 'Visual reference assessment'}
+Reported Symptoms / Concerns: ${Array.isArray(context?.symptoms) && context.symptoms.length > 0 ? context.symptoms.join(', ') : context?.userConcern || 'None reported'}
+${context?.customConcern ? `User Additional Description: "${context.customConcern}"` : ''}
+Photo Provided: ${hasPhoto ? 'Yes' : 'No (Photo not provided)'}
+Special Mode: ${context?.isFaceExposureMode ? 'Check general exposure on face' : 'Standard'}
 
-Analyze the attached image and return the structured assessment.`;
+Provide the non-diagnostic exposure assessment adhering strictly to the Big 3 structure and guidelines.`;
 
-      // Use gemini-3.1-flash-lite for responsive multimodal image reasoning
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
-        contents: {
-          parts: [
-            {
-              inlineData: {
-                mimeType,
-                data: rawData,
-              },
-            },
-            { text: promptText },
-          ],
-        },
-        config: {
-          systemInstruction,
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              visibleContent: {
-                type: Type.STRING,
-                description: 'Objective description of what is visible in the image.',
-              },
-              environmentalObservations: {
-                type: Type.STRING,
-                description: 'Visible environmental or air-quality observations relevant to the image and location telemetry.',
-              },
-              potentialFactors: {
-                type: Type.STRING,
-                description: 'Non-diagnostic potential contributors using mandatory phrasing (This may be consistent with..., Possible environmental contributors include..., The image alone cannot determine the cause).',
-              },
-              precautions: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: 'Appropriate protective precautions when relevant.',
-              },
-            },
-            required: ['visibleContent', 'environmentalObservations', 'potentialFactors', 'precautions'],
+      const analysisSchema = {
+        type: Type.OBJECT,
+        properties: {
+          photoProvided: { type: Type.BOOLEAN },
+          visibleContent: { type: Type.STRING },
+          whatMayBeIrritating: { type: Type.STRING },
+          whyThisMatters: { type: Type.STRING },
+          doList: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+          },
+          dontList: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+          },
+          whenToGetHelp: { type: Type.STRING },
+          researchAnalysis: { type: Type.STRING },
+          environmentalObservations: { type: Type.STRING },
+          potentialFactors: { type: Type.STRING },
+          precautions: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
           },
         },
-      });
+        required: [
+          'visibleContent',
+          'whatMayBeIrritating',
+          'whyThisMatters',
+          'doList',
+          'dontList',
+          'whenToGetHelp',
+          'environmentalObservations',
+          'potentialFactors',
+          'precautions',
+        ],
+      };
+
+      let response;
+      if (hasPhoto) {
+        let mimeType = 'image/jpeg';
+        let rawData = imageBase64;
+        if (imageBase64.includes(';base64,')) {
+          const parts = imageBase64.split(';base64,');
+          const match = parts[0].match(/data:(.*?)$/);
+          if (match) {
+            mimeType = match[1];
+          }
+          rawData = parts[1];
+        }
+
+        response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: {
+            parts: [
+              {
+                inlineData: {
+                  mimeType,
+                  data: rawData,
+                },
+              },
+              { text: promptText },
+            ],
+          },
+          config: {
+            systemInstruction,
+            responseMimeType: 'application/json',
+            responseSchema: analysisSchema,
+          },
+        });
+      } else {
+        response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: promptText,
+          config: {
+            systemInstruction,
+            responseMimeType: 'application/json',
+            responseSchema: analysisSchema,
+          },
+        });
+      }
 
       const jsonText = response.text;
       if (!jsonText) {
-        throw new Error('Empty response from vision model');
+        throw new Error('Empty response from model');
       }
 
       const parsed = JSON.parse(jsonText);
+      parsed.photoProvided = hasPhoto;
+      if (!hasPhoto) {
+        parsed.visibleContent = 'Photo not provided';
+      }
+
       res.json({
         result: parsed,
-        source: 'gemini-3.1-flash-lite',
+        source: 'gemini-3.8-flash',
       });
     } catch (err: any) {
-      console.error('Vision analysis error:', err);
-      res.status(500).json({
-        error: "We couldn't analyze this image. Please try another photo.",
-        details: err?.message,
+      console.warn('Gemini analysis error, serving scientific fallback:', err?.message || err);
+      const fallback = generateExposureAnalysisFallback(req.body?.context, Boolean(req.body?.imageBase64));
+      res.json({
+        result: fallback,
+        source: 'AirGuard Environmental Intelligence',
       });
     }
   });

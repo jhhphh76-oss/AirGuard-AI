@@ -76,6 +76,67 @@ export const historyService = {
     }
   },
 
+  addPhotoAnalysisRecord({
+    reading,
+    imageDataUrl,
+    analysis,
+  }: {
+    reading: AQIReading;
+    imageDataUrl?: string | null;
+    analysis: any;
+  }): HistoryRecord | null {
+    try {
+      const existing = this.getHistory();
+      const timestamp = Date.now();
+      const recordDate = new Date(timestamp);
+
+      const newRecord: HistoryRecord = {
+        id: `photo_analysis_${timestamp}_${Math.random().toString(36).substring(2, 7)}`,
+        date: recordDate.toLocaleDateString(undefined, {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+        }),
+        time: recordDate.toLocaleTimeString(undefined, {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false,
+        }),
+        retrievalTimestamp: timestamp,
+        location: reading.location,
+        latitude: reading.location.latitude,
+        longitude: reading.location.longitude,
+        aqi: reading.aqi,
+        category: reading.category,
+        pollutants: reading.pollutants,
+        indicators: reading.indicators,
+        source: 'AirGuard Photo Exposure Analysis',
+        recordType: 'photo_analysis',
+        imageDataUrl: imageDataUrl || null,
+        photoAnalysis: {
+          whatMayBeIrritating: analysis?.whatMayBeIrritating || analysis?.visibleContent,
+          whyThisMatters: analysis?.whyThisMatters || analysis?.environmentalObservations,
+          doList: analysis?.doList || analysis?.precautions?.slice(0, 2),
+          dontList: analysis?.dontList,
+          whenToGetHelp: analysis?.whenToGetHelp,
+          researchAnalysis: analysis?.researchAnalysis,
+          symptoms: analysis?.selectedConcerns,
+          precautions: analysis?.precautions,
+          potentialFactors: analysis?.potentialFactors,
+          visibleContent: analysis?.visibleContent,
+        },
+      };
+
+      const updated = [newRecord, ...existing].slice(0, MAX_HISTORY_ITEMS);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      return newRecord;
+    } catch (e) {
+      console.error('Failed to save photo analysis to history:', e);
+      return null;
+    }
+  },
+
   deleteRecord(id: string): void {
     try {
       const existing = this.getHistory();

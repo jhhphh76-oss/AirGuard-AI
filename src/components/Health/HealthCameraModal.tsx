@@ -14,6 +14,7 @@ interface HealthCameraModalProps {
   isOpen: boolean;
   onClose: () => void;
   onPhotoSelected: (photoDataUrl: string, fileBlob?: Blob) => void;
+  onContinueWithoutPhoto?: () => void;
 }
 
 type CameraState =
@@ -29,6 +30,7 @@ export const HealthCameraModal: React.FC<HealthCameraModalProps> = ({
   isOpen,
   onClose,
   onPhotoSelected,
+  onContinueWithoutPhoto,
 }) => {
   const [cameraState, setCameraState] = useState<CameraState>('idle');
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -63,6 +65,14 @@ export const HealthCameraModal: React.FC<HealthCameraModalProps> = ({
     setErrorMessage('');
     onClose();
   }, [stopStream, onClose]);
+
+  // Clean exit via "Continue without photo"
+  const handleContinueWithoutPhoto = useCallback(() => {
+    handleClose();
+    if (onContinueWithoutPhoto) {
+      onContinueWithoutPhoto();
+    }
+  }, [handleClose, onContinueWithoutPhoto]);
 
   // Start device camera using navigator.mediaDevices.getUserMedia({ video: true })
   const startCamera = useCallback(async () => {
@@ -232,14 +242,23 @@ export const HealthCameraModal: React.FC<HealthCameraModalProps> = ({
               <p className="text-[10px] text-slate-400">Environmental Visual Reference</p>
             </div>
           </div>
-          <button
-            onClick={handleClose}
-            className="p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors"
-            title="Close camera"
-            aria-label="Close camera"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleContinueWithoutPhoto}
+              className="text-[11px] font-semibold text-[#5EEAD4] hover:underline px-1 cursor-pointer"
+            >
+              Continue without photo
+            </button>
+            <button
+              onClick={handleClose}
+              className="p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors"
+              title="Close camera"
+              aria-label="Close camera"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Hidden File Inputs for fallback options */}
@@ -346,6 +365,13 @@ export const HealthCameraModal: React.FC<HealthCameraModalProps> = ({
                   <Smartphone className="w-4 h-4 text-[#38BDF8]" />
                   <span>Device Camera App</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={handleContinueWithoutPhoto}
+                  className="w-full py-2.5 px-4 rounded-xl bg-[#09212D] border border-slate-700 hover:border-slate-500 text-[#5EEAD4] font-semibold text-xs transition-colors cursor-pointer"
+                >
+                  Continue without photo
+                </button>
               </div>
             </div>
           )}
@@ -381,6 +407,13 @@ export const HealthCameraModal: React.FC<HealthCameraModalProps> = ({
                 </button>
                 <button
                   type="button"
+                  onClick={handleContinueWithoutPhoto}
+                  className="w-full py-2.5 px-4 rounded-xl bg-[#09212D] border border-slate-700 hover:border-slate-500 text-[#5EEAD4] font-semibold text-xs transition-colors cursor-pointer"
+                >
+                  Continue without photo
+                </button>
+                <button
+                  type="button"
                   onClick={startCamera}
                   className="w-full py-2 px-4 rounded-xl text-slate-400 hover:text-white text-xs transition-colors"
                 >
@@ -406,7 +439,7 @@ export const HealthCameraModal: React.FC<HealthCameraModalProps> = ({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="py-2.5 px-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shrink-0"
               >
                 <Upload className="w-3.5 h-3.5" />
                 <span>Upload</span>
@@ -414,17 +447,17 @@ export const HealthCameraModal: React.FC<HealthCameraModalProps> = ({
               <button
                 type="button"
                 onClick={handleCapturePhoto}
-                className="flex-1 py-3 px-4 rounded-xl bg-[#06B6D4] hover:bg-[#06B6D4]/80 text-[#071A24] font-bold text-xs flex items-center justify-center gap-2 shadow-[0_0_12px_rgba(6,182,212,0.4)] transition-all cursor-pointer"
+                className="flex-1 py-3 px-3 rounded-xl bg-[#06B6D4] hover:bg-[#06B6D4]/80 text-[#071A24] font-bold text-xs flex items-center justify-center gap-1.5 shadow-[0_0_12px_rgba(6,182,212,0.4)] transition-all cursor-pointer"
               >
                 <Camera className="w-4 h-4" />
                 <span>Capture Photo</span>
               </button>
               <button
                 type="button"
-                onClick={handleClose}
-                className="py-2.5 px-3 rounded-xl text-slate-400 hover:text-white text-xs font-semibold cursor-pointer"
+                onClick={handleContinueWithoutPhoto}
+                className="py-2.5 px-2.5 rounded-xl text-[#5EEAD4] hover:bg-slate-800 text-xs font-semibold cursor-pointer shrink-0"
               >
-                Cancel
+                Skip Photo
               </button>
             </>
           )}
@@ -451,13 +484,22 @@ export const HealthCameraModal: React.FC<HealthCameraModalProps> = ({
           )}
 
           {cameraState !== 'streaming' && cameraState !== 'captured' && (
-            <button
-              type="button"
-              onClick={handleClose}
-              className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
+            <div className="flex items-center gap-2 w-full">
+              <button
+                type="button"
+                onClick={handleContinueWithoutPhoto}
+                className="flex-1 py-2.5 rounded-xl bg-[#0F766E] hover:bg-[#0F766E]/80 text-white text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Continue without photo
+              </button>
+              <button
+                type="button"
+                onClick={handleClose}
+                className="py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
           )}
         </div>
       </div>

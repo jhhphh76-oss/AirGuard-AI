@@ -10,6 +10,42 @@ const STORAGE_ACTIVE_LOCATION_KEY = 'airguard_active_location';
 
 export const GLOBAL_LOCATION_PRESETS: LocationData[] = [
   {
+    name: 'Vijayapura',
+    admin1: 'Karnataka',
+    country: 'India',
+    latitude: 16.8302,
+    longitude: 75.7100,
+    timezone: 'Asia/Kolkata',
+    contextLabel: 'Deccan Plateau Historical Hub',
+  },
+  {
+    name: 'Bengaluru Urban',
+    admin1: 'Karnataka',
+    country: 'India',
+    latitude: 12.9719,
+    longitude: 77.5937,
+    timezone: 'Asia/Kolkata',
+    contextLabel: 'Metropolitan District',
+  },
+  {
+    name: 'Bengaluru',
+    admin1: 'Karnataka',
+    country: 'India',
+    latitude: 12.9716,
+    longitude: 77.5946,
+    timezone: 'Asia/Kolkata',
+    contextLabel: 'South Indian Plateau Tech Hub',
+  },
+  {
+    name: 'New Delhi',
+    admin1: 'Delhi',
+    country: 'India',
+    latitude: 28.6139,
+    longitude: 77.2090,
+    timezone: 'Asia/Kolkata',
+    contextLabel: 'National Capital Territory',
+  },
+  {
     name: 'London',
     admin1: 'England',
     country: 'United Kingdom',

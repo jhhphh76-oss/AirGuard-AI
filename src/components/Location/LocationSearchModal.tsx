@@ -141,7 +141,7 @@ export const LocationSearchModal: React.FC<LocationSearchModalProps> = ({
             ) : (
               <Navigation className="w-3.5 h-3.5 text-[#06B6D4]" />
             )}
-            <span>Use My Exact GPS Location</span>
+            <span>Use Current Location</span>
           </button>
 
           {errorMsg && (
@@ -180,10 +180,13 @@ export const LocationSearchModal: React.FC<LocationSearchModalProps> = ({
                           : 'bg-[#09212D] border-[#263238] text-slate-200'
                       }`}
                     >
-                      <div className="flex items-center gap-2 min-w-0">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
                         <MapPin className="w-3.5 h-3.5 text-[#06B6D4] shrink-0" />
-                        <div className="min-w-0">
-                          <div className="font-semibold text-xs text-white truncate">
+                        <div className="min-w-0 flex-1">
+                          <div
+                            className="font-semibold text-xs text-white truncate"
+                            title={`${loc.name}${loc.admin1 ? ` · ${loc.admin1}` : ''}, ${loc.country}`}
+                          >
                             {loc.name}
                             {loc.admin1 && (
                               <span className="text-slate-400 font-normal"> · {loc.admin1}</span>
@@ -218,15 +221,18 @@ export const LocationSearchModal: React.FC<LocationSearchModalProps> = ({
                     <button
                       key={preset.name}
                       onClick={() => handleSelect(preset)}
-                      className={`text-left p-2.5 rounded-xl border transition-all ${
+                      className={`text-left p-2.5 rounded-xl border transition-all min-w-0 overflow-hidden ${
                         isSelected
                           ? 'bg-[#0F766E]/20 border-[#0F766E] text-white'
                           : 'bg-[#09212D] border-[#263238] text-slate-200'
                       }`}
+                      title={`${preset.name}${preset.admin1 ? `, ${preset.admin1}` : ''}, ${preset.country}`}
                     >
-                      <div className="font-bold text-xs text-white">{preset.name}</div>
-                      <div className="text-[10px] text-slate-400 truncate">{preset.country}</div>
-                      <div className="text-[9px] font-mono text-[#06B6D4] mt-0.5">
+                      <div className="font-bold text-xs text-white truncate">{preset.name}</div>
+                      <div className="text-[10px] text-slate-400 truncate">
+                        {preset.admin1 ? `${preset.admin1}, ` : ''}{preset.country}
+                      </div>
+                      <div className="text-[9px] font-mono text-[#06B6D4] mt-0.5 truncate">
                         {preset.latitude.toFixed(1)}°, {preset.longitude.toFixed(1)}°
                       </div>
                     </button>

@@ -138,7 +138,7 @@ export const AirGuardLogo: React.FC<AirGuardLogoProps> = ({
               AI
             </span>
           </div>
-          <span className="text-[10px] tracking-wide text-slate-400 font-medium mt-1">
+          <span className="hidden sm:block text-[10px] tracking-wide text-slate-400 font-medium mt-0.5">
             Intelligent Air Quality Protection
           </span>
         </div>
