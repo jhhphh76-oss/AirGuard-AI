@@ -93,7 +93,7 @@ class FeatureExtractionService {
           }
         }
 
-        const rawMean = count > 0 ? sum / count : 0.5;
+        const rawMean = count > 0 ? sum / count : 0;
         // Normalize using calibration standard
         const normalized = calibrationService.normalizeSample(rawMean * 255.0);
 
@@ -106,8 +106,10 @@ class FeatureExtractionService {
 
       // Overall regional mean reflectance
       const meanReflectance =
-        wavelengthReflectances.reduce((acc, item) => acc + item.reflectance, 0) /
-        wavelengthReflectances.length;
+        wavelengthReflectances.length > 0
+          ? wavelengthReflectances.reduce((acc, item) => acc + item.reflectance, 0) /
+            wavelengthReflectances.length
+          : 0;
 
       // Regional variation score (spatial standard deviation across green channel 530nm)
       const greenBand = cube.bands.find((b) => b.nominalWavelengthNm === 530) || cube.bands[2];
@@ -131,23 +133,26 @@ class FeatureExtractionService {
       }
 
       const variationScore =
-        pixelCount > 1 ? Math.sqrt(varianceSum / pixelCount) : 0.05;
+        pixelCount > 1 ? Math.sqrt(varianceSum / pixelCount) : 0;
 
       // Neutral variation categorization
       let variationCategory: VariationCategory = 'Low variation';
-      if (variationScore >= 0.14) {
+      if (pixelCount <= 1 || meanReflectance === 0) {
+        variationCategory = 'Insufficient data';
+      } else if (variationScore >= 0.14) {
         variationCategory = 'Higher variation';
       } else if (variationScore >= 0.07) {
         variationCategory = 'Moderate variation';
       }
 
       // Relative spectral differences
-      const red = wavelengthReflectances.find((w) => w.wavelengthNm === 620)?.reflectance || 0.6;
-      const green = wavelengthReflectances.find((w) => w.wavelengthNm === 530)?.reflectance || 0.5;
-      const blue = wavelengthReflectances.find((w) => w.wavelengthNm === 450)?.reflectance || 0.4;
+      const red = wavelengthReflectances.find((w) => w.wavelengthNm === 620)?.reflectance ?? 0;
+      const green = wavelengthReflectances.find((w) => w.wavelengthNm === 530)?.reflectance ?? 0;
+      const blue = wavelengthReflectances.find((w) => w.wavelengthNm === 450)?.reflectance ?? 0;
 
-      const redGreenRatio = green > 0.01 ? Math.round((red / green) * 100) / 100 : 1.0;
-      const blueIndex = Math.round((blue / (red + green + blue + 0.001)) * 100) / 100;
+      const redGreenRatio = green > 0.01 ? Math.round((red / green) * 100) / 100 : 0;
+      const totalColor = red + green + blue;
+      const blueIndex = totalColor > 0.01 ? Math.round((blue / totalColor) * 100) / 100 : 0;
       const contrastUniformity = Math.round((1 - Math.min(1, variationScore * 4)) * 100) / 100;
 
       result[key] = {

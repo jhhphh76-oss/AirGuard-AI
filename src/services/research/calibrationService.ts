@@ -25,7 +25,16 @@ class CalibrationService {
   private normalized = false;
 
   public getStatus(): CalibrationState {
-    const isReady = this.darkCaptured && this.whiteCaptured;
+    const hasStandards = this.darkCaptured && this.whiteCaptured;
+    let statusLabel: 'Calibrated' | 'Calibration incomplete' | 'Not calibrated' = 'Not calibrated';
+    if (hasStandards && this.skinCaptured && this.normalized) {
+      statusLabel = 'Calibrated';
+    } else if (this.darkCaptured || this.whiteCaptured || this.skinCaptured) {
+      statusLabel = 'Calibration incomplete';
+    } else {
+      statusLabel = 'Not calibrated';
+    }
+
     return {
       darkCaptured: this.darkCaptured,
       darkValue: this.darkValue,
@@ -33,8 +42,8 @@ class CalibrationService {
       whiteValue: this.whiteValue,
       skinCaptured: this.skinCaptured,
       normalized: this.normalized,
-      isReady,
-      statusLabel: isReady && this.skinCaptured && this.normalized ? 'Ready' : 'Incomplete',
+      isReady: hasStandards && this.skinCaptured && this.normalized,
+      statusLabel,
       formula: 'Normalized Reflectance = (Sample - Dark) / (Reference - Dark)',
     };
   }
@@ -102,6 +111,10 @@ class CalibrationService {
    * Safely handles edge cases (e.g. division by zero, saturated pixels)
    */
   public normalizeSample(sampleValue: number): number {
+    if (!this.darkCaptured || !this.whiteCaptured) {
+      this.normalized = false;
+      return Math.max(0, Math.min(1.0, Math.round((sampleValue / 255.0) * 1000) / 1000));
+    }
     const denom = this.whiteValue - this.darkValue;
     if (denom <= 0) return 0;
     const normalized = (sampleValue - this.darkValue) / denom;

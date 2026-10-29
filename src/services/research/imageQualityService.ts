@@ -31,13 +31,13 @@ class ImageQualityService {
     if (!ctx) {
       return {
         qualityCategory: 'Needs Improvement',
-        brightnessConsistency: 50,
-        exposureQuality: 'Balanced',
-        meanLuminance: 128,
-        blurSharpnessScore: 10,
+        imageSuitability: 'Image suitability not verified',
+        brightnessConsistency: 0,
+        exposureQuality: 'Underexposed',
+        meanLuminance: 0,
+        blurSharpnessScore: 0,
         isSharp: false,
-        faceDetectionConfidence: 0,
-        usableFaceAreaPercent: 0,
+        faceDetected: false,
         resolution: { width, height },
         issues: ['Image buffer could not be processed.'],
       };
@@ -52,13 +52,13 @@ class ImageQualityService {
     if (!sCtx) {
       return {
         qualityCategory: 'Needs Improvement',
-        brightnessConsistency: 50,
-        exposureQuality: 'Balanced',
-        meanLuminance: 128,
-        blurSharpnessScore: 10,
+        imageSuitability: 'Image suitability not verified',
+        brightnessConsistency: 0,
+        exposureQuality: 'Underexposed',
+        meanLuminance: 0,
+        blurSharpnessScore: 0,
         isSharp: false,
-        faceDetectionConfidence: faceConfidence,
-        usableFaceAreaPercent: Math.round(usableFaceRatio * 100),
+        faceDetected: false,
         resolution: { width, height },
         issues: ['Sample context unavailable.'],
       };
@@ -149,8 +149,9 @@ class ImageQualityService {
     }
 
     // 4. Face Detection Check
-    if (faceConfidence < 45) {
-      issues.push('Face could not be reliably detected.');
+    const faceDetected = faceConfidence >= 45;
+    if (!faceDetected) {
+      issues.push('Face target could not be reliably detected.');
     }
 
     // Resolution check
@@ -158,17 +159,24 @@ class ImageQualityService {
       issues.push('Image resolution is lower than research recommendation (min 320×320).');
     }
 
-    const usableFaceAreaPercent = Math.round(usableFaceRatio * 100);
+    const usableFaceAreaPercent = usableFaceRatio ? Math.round(usableFaceRatio * 100) : undefined;
     const qualityCategory: 'Good' | 'Needs Improvement' =
       issues.length === 0 ? 'Good' : 'Needs Improvement';
 
+    const imageSuitability: 'Verified' | 'Image suitability not verified' =
+      qualityCategory === 'Good' && faceDetected
+        ? 'Verified'
+        : 'Image suitability not verified';
+
     return {
       qualityCategory,
+      imageSuitability,
       brightnessConsistency,
       exposureQuality,
       meanLuminance: Math.round(meanLuminance),
       blurSharpnessScore,
       isSharp,
+      faceDetected,
       faceDetectionConfidence: Math.round(faceConfidence),
       usableFaceAreaPercent,
       resolution: { width, height },

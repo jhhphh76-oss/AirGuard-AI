@@ -157,13 +157,13 @@ class FaceSegmentationService {
       };
     }
 
-    // High confidence segmentation achieved
-    const confidenceScore = Math.min(96, Math.max(68, Math.round(55 + skinRatio * 45)));
+    // Skin presence verified
+    const confidenceScore = Math.round(skinRatio * 100);
 
     return {
       isConfident: true,
       confidenceScore,
-      statusMessage: `Face segmentation verified (${confidenceScore}% confidence).`,
+      statusMessage: `Face segmentation verified (${confidenceScore}% skin region detected).`,
       regions,
     };
   }

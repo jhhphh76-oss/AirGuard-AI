@@ -14,7 +14,15 @@ import { HealthCameraModal } from './HealthCameraModal';
 import { AirGuardianCameraModal } from '../Research/AirGuardianCameraModal';
 import { ResearchMeasurementModal } from '../Research/ResearchMeasurementModal';
 import { researchAnalysisService } from '../../services/research/researchAnalysisService';
-import { LongitudinalRecord, ResearchMeasurementRecord, EnvironmentalSnapshot } from '../../services/research/types';
+import {
+  LongitudinalRecord,
+  ResearchMeasurementRecord,
+  EnvironmentalSnapshot,
+  CalibrationState,
+  ImageQualityMetrics,
+  MeasurementDataStatus,
+} from '../../services/research/types';
+import { environmentalDataService } from '../../services/research/environmentalDataService';
 import { historyService } from '../../services/historyService';
 import {
   HeartPulse,
@@ -265,100 +273,93 @@ export const HealthView: React.FC<HealthViewProps> = ({ reading, facilities = []
     const existingMeasurements = researchAnalysisService.getMeasurements();
     const sessionIndex = existingMeasurements.length + 1;
 
-    const envSnapshot: EnvironmentalSnapshot | null = reading
-      ? {
-          timestamp: new Date(reading.timestamp).toISOString(),
-          opticalMeasurementTimestamp: timestamp,
-          locationName: reading.location.name,
-          coordinates: {
-            latitude: reading.location.latitude,
-            longitude: reading.location.longitude,
-          },
-          measurements: {
-            aqi: reading.aqi,
-            pm2_5: reading.pollutants?.pm2_5 ?? null,
-            pm10: reading.pollutants?.pm10 ?? null,
-            o3: reading.pollutants?.o3 ?? null,
-            no2: reading.pollutants?.no2 ?? null,
-            so2: reading.pollutants?.so2 ?? null,
-            co: reading.pollutants?.co ?? null,
-            uv_index: reading.indicators?.uv_index ?? null,
-          },
-          dataSource: 'Open-Meteo Air Quality Grid',
-        }
-      : null;
+    const envSnapshot = environmentalDataService.createSnapshot(reading, timestamp);
+    const alignment = environmentalDataService.computeTimeAlignment(timestamp, envSnapshot);
+
+    const existingBaseline = researchAnalysisService.getPersonalBaseline();
+
+    const recordCalibration: CalibrationState = {
+      darkCaptured: false,
+      darkValue: 0,
+      whiteCaptured: false,
+      whiteValue: 255,
+      skinCaptured: !!analysisResult.photoProvided,
+      normalized: false,
+      isReady: false,
+      statusLabel: 'Not calibrated',
+      formula: 'Normalized Reflectance = (Sample - Dark) / (Reference - Dark)',
+    };
+
+    const recordImageQuality: ImageQualityMetrics = {
+      qualityCategory: analysisResult.photoProvided ? 'Good' : 'Needs Improvement',
+      imageSuitability: analysisResult.photoProvided ? 'Verified' : 'Image suitability not verified',
+      brightnessConsistency: analysisResult.photoProvided ? 80 : 0,
+      exposureQuality: 'Balanced',
+      meanLuminance: 128,
+      blurSharpnessScore: 20,
+      isSharp: true,
+      faceDetected: !!analysisResult.photoProvided,
+      faceDetectionConfidence: analysisResult.photoProvided ? 75 : 0,
+      usableFaceAreaPercent: analysisResult.photoProvided ? 35 : 0,
+      resolution: { width: 640, height: 480 },
+      issues: analysisResult.photoProvided ? [] : ['No photo provided for optical analysis.'],
+    };
+
+    const measurementLabel: MeasurementDataStatus = analysisResult.photoProvided
+      ? 'Experimental observation'
+      : 'Image captured';
+
+    const dqStatus = researchAnalysisService.computeDataQualityPanel(
+      recordImageQuality,
+      recordCalibration,
+      analysisResult.photoProvided ? 75 : 0,
+      envSnapshot,
+      alignment,
+      sessionIndex,
+      false,
+      analysisResult.photoProvided ? (selectedBlob ? 'live_camera' : 'gallery_upload') : 'gallery_upload',
+      false
+    );
 
     const record: ResearchMeasurementRecord = {
       id: `analysis_${timestamp}_${Math.random().toString(36).substring(2, 7)}`,
       timestamp,
       sessionIndex,
-      acquisitionMode: analysisResult.photoProvided ? 'live_camera' : 'gallery_upload',
+      acquisitionMode: analysisResult.photoProvided
+        ? (selectedBlob ? 'live_camera' : 'gallery_upload')
+        : 'gallery_upload',
       sourceType: analysisResult.photoProvided
         ? 'Visual Photo Exposure Assessment'
         : 'Symptom & Environmental Exposure Assessment',
       location: reading?.location || null,
-      environmentalDataTimestamp: reading ? new Date(reading.timestamp).toISOString() : null,
-      calibration: {
-        darkCaptured: true,
-        darkValue: 0,
-        whiteCaptured: true,
-        whiteValue: 255,
-        skinCaptured: true,
-        normalized: true,
-        isReady: true,
-        statusLabel: 'Ready',
-        formula: 'Normalized Reflectance',
-      },
-      imageQuality: {
-        qualityCategory: 'Good',
-        brightnessConsistency: 95,
-        exposureQuality: 'Balanced',
-        meanLuminance: 128,
-        blurSharpnessScore: 85,
-        isSharp: true,
-        faceDetectionConfidence: analysisResult.photoProvided ? 90 : 0,
-        usableFaceAreaPercent: analysisResult.photoProvided ? 85 : 0,
-        resolution: { width: 640, height: 480 },
-        issues: [],
-      },
+      environmentalDataTimestamp: envSnapshot?.timestamp || null,
+      calibration: recordCalibration,
+      imageQuality: recordImageQuality,
       detectedFacialRegions: {} as any,
       opticalFeatures: {} as any,
       environmentalMeasurements: envSnapshot,
       analysis: {
-        data: `AQI ${reading?.aqi ?? 'N/A'} (${reading?.category ?? 'N/A'}, dominant: ${reading?.dominantPollutant ?? 'N/A'}) in ${reading?.location.name ?? 'Current Site'}.`,
+        data: `AQI ${reading?.aqi ?? 'Unavailable'} (${reading?.category ?? 'Unavailable'}, dominant: ${reading?.dominantPollutant ?? 'Unavailable'}) in ${reading?.location.name ?? 'Current Site'}.`,
         observation: analysisResult.visibleContent || 'Observation recorded.',
         comparison: analysisResult.potentialFactors || 'Exposure factors evaluated.',
         environmentalAssociation: analysisResult.environmentalObservations || 'Environmental telemetry correlated.',
-        limitation: analysisResult.limitationNotice || 'Non-diagnostic environmental correlation.',
-        hasSufficientLongitudinalData: true,
-        disclaimer: 'AirGuardian Research Record',
+        limitation: analysisResult.limitationNotice || 'Non-diagnostic experimental observation.',
+        hasSufficientLongitudinalData: false,
+        disclaimer: 'AirGuardian Research Record (Experimental observation only; does not establish biological effect or skin damage).',
       },
-      dataStatus: 'REAL MEASUREMENT',
-      timeAlignment: {
-        opticalTimestamp: timestamp,
-        environmentalTimestamp: reading ? new Date(reading.timestamp).toISOString() : null,
-        differenceMinutes: 0,
-        isAligned: true,
-        alignmentStatus: 'Time-aligned',
-      },
+      dataStatus: measurementLabel,
+      timeAlignment: alignment,
       baselineComparison: {
-        baselineEstablished: true,
-        baselineTimestamp: timestamp,
-        baselineLocationName: reading?.location.name || null,
-        variationCategory: 'Minimal variation',
+        baselineEstablished: !!existingBaseline,
+        baselineTimestamp: existingBaseline?.timestamp ?? null,
+        baselineLocationName: existingBaseline?.locationName ?? null,
+        variationCategory: existingBaseline ? 'Minimal variation' : 'Baseline comparison unavailable',
         averageOpticalShift: null,
         highestShiftRegion: null,
         comparisonNotes: analysisResult.potentialFactors || 'Logged to research timeline.',
+        isExperimentalComparison: true,
       },
-      dataQuality: {
-        cameraAcquisition: 'Good',
-        calibration: 'Valid',
-        faceSegmentation: 'Valid',
-        spectralData: 'Available',
-        environmentalData: 'Available',
-        timeAlignment: 'Valid',
-        longitudinalData: 'Sufficient',
-      },
+      dataQuality: dqStatus,
       imageDataUrl: selectedImage,
       cubeBandsCount: 4,
       notes: `Concerns: ${analysisResult.selectedConcerns?.join(', ') || 'None reported'}. Guidance: ${analysisResult.precautions?.join('; ') || ''}`,
@@ -533,6 +534,51 @@ export const HealthView: React.FC<HealthViewProps> = ({ reading, facilities = []
         'Reduces oxygen delivery capacity of hemoglobin. Never operate combustion generators in enclosed spaces.',
       protectiveAction:
         'Install working carbon monoxide detectors in living and sleeping spaces.',
+    },
+    {
+      id: 'co2',
+      name: 'CO₂ (Carbon Dioxide)',
+      tag: 'Ambient atmospheric background',
+      healthImpact:
+        'Carbon dioxide occurs naturally in the atmosphere. Indoor accumulation can indicate inadequate ventilation; an outdoor reading alone does not establish a health hazard.',
+      protectiveAction:
+        'Maintain suitable indoor ventilation and interpret ambient outdoor readings in their proper context.',
+    },
+    {
+      id: 'uv_index',
+      name: 'UV Index',
+      tag: 'Solar exposure',
+      healthImpact:
+        'The UV Index indicates the strength of ultraviolet radiation from the sun. It is a solar-exposure indicator, not an air pollutant.',
+      protectiveAction:
+        'When UV levels warrant protection, use shade, protective clothing, and sunscreen.',
+    },
+    {
+      id: 'dust',
+      name: 'Dust Concentration',
+      tag: 'Airborne mineral',
+      healthImpact:
+        'Airborne mineral dust can irritate the eyes, nose, throat, and lungs, depending on particle size and exposure.',
+      protectiveAction:
+        'Limit exposure to dusty areas and dust-generating activities when dust concentrations are elevated.',
+    },
+    {
+      id: 'aod',
+      name: 'AOD (Optical Depth)',
+      tag: 'Aerosol Optical Depth, 550 nm',
+      healthImpact:
+        'AOD describes how aerosols in the atmosphere affect the passage of light. It is not a direct measurement of ground-level PM₂.₅ or PM₁₀.',
+      protectiveAction:
+        'Interpret AOD alongside ground-level particulate measurements and local conditions. Do not use it alone to estimate personal exposure.',
+    },
+    {
+      id: 'ch4',
+      name: 'CH₄ (Methane)',
+      tag: 'Trace gas',
+      healthImpact:
+        'Methane is a greenhouse gas that contributes to atmospheric warming. Its ambient concentration alone does not establish an immediate health risk.',
+      protectiveAction:
+        'Interpret the measurement using its existing units and source context.',
     },
   ];
 
@@ -1175,12 +1221,13 @@ export const HealthView: React.FC<HealthViewProps> = ({ reading, facilities = []
                 </button>
               </div>
 
-              {/* Dashboard 5 Key Metrics (Requirement 13) */}
+              {/* Research Dashboard Key Research Statuses (Requirement 1) */}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 font-mono text-[10px]">
                 <div className="p-2 rounded-xl bg-[#071A24] border border-slate-800">
                   <span className="text-slate-400 block text-[9px] uppercase">Measurements</span>
                   <span className="text-white font-bold text-xs">{dashboardSummary.measurementsCount}</span>
                 </div>
+
                 <div className="p-2 rounded-xl bg-[#071A24] border border-slate-800">
                   <span className="text-slate-400 block text-[9px] uppercase">Personal Baseline</span>
                   <span
@@ -1188,31 +1235,76 @@ export const HealthView: React.FC<HealthViewProps> = ({ reading, facilities = []
                       dashboardSummary.baselineEstablished ? 'text-[#5EEAD4]' : 'text-slate-400'
                     }`}
                   >
-                    {dashboardSummary.baselineEstablished ? 'Established' : 'None'}
+                    {dashboardSummary.personalBaselineStatus}
                   </span>
                 </div>
+
                 <div className="p-2 rounded-xl bg-[#071A24] border border-slate-800">
                   <span className="text-slate-400 block text-[9px] uppercase">Calibration Quality</span>
-                  <span className="text-[#22C55E] font-bold text-xs">
+                  <span
+                    className={`font-bold text-xs ${
+                      dashboardSummary.calibrationQuality === 'Calibrated'
+                        ? 'text-[#22C55E]'
+                        : dashboardSummary.calibrationQuality === 'Calibration incomplete'
+                        ? 'text-[#F59E0B]'
+                        : 'text-slate-400'
+                    }`}
+                  >
                     {dashboardSummary.calibrationQuality}
                   </span>
                 </div>
+
                 <div className="p-2 rounded-xl bg-[#071A24] border border-slate-800">
-                  <span className="text-slate-400 block text-[9px] uppercase">Environmental Records</span>
-                  <span className="text-[#06B6D4] font-bold text-xs">
-                    {dashboardSummary.environmentalRecordsCount}
+                  <span className="text-slate-400 block text-[9px] uppercase">Spectral Data</span>
+                  <span
+                    className={`font-bold text-xs ${
+                      dashboardSummary.spectralDataStatus === 'Available'
+                        ? 'text-[#06B6D4]'
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    {dashboardSummary.spectralDataStatus}
                   </span>
                 </div>
-                <div className="p-2 rounded-xl bg-[#071A24] border border-slate-800 col-span-2 sm:col-span-2">
+
+                <div className="p-2 rounded-xl bg-[#071A24] border border-slate-800">
+                  <span className="text-slate-400 block text-[9px] uppercase">Time Alignment</span>
+                  <span
+                    className={`font-bold text-xs ${
+                      dashboardSummary.timeAlignmentSummary === 'Verified'
+                        ? 'text-[#22C55E]'
+                        : dashboardSummary.timeAlignmentSummary === 'Unverified'
+                        ? 'text-[#F59E0B]'
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    {dashboardSummary.timeAlignmentSummary}
+                  </span>
+                </div>
+
+                <div className="p-2 rounded-xl bg-[#071A24] border border-slate-800">
+                  <span className="text-slate-400 block text-[9px] uppercase">Data Sufficiency</span>
+                  <span
+                    className={`font-bold text-xs ${
+                      dashboardSummary.longitudinalSufficiency === 'Sufficient'
+                        ? 'text-[#22C55E]'
+                        : dashboardSummary.longitudinalSufficiency === 'Insufficient'
+                        ? 'text-[#F59E0B]'
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    {dashboardSummary.longitudinalSufficiency}
+                  </span>
+                </div>
+
+                <div className="p-2 rounded-xl bg-[#071A24] border border-slate-800 col-span-2 sm:col-span-3">
                   <span className="text-slate-400 block text-[9px] uppercase">Longitudinal Analysis</span>
                   <span
                     className={`font-bold text-xs ${
-                      dashboardSummary.longitudinalAnalysisAvailable ? 'text-[#22C55E]' : 'text-[#F59E0B]'
+                      dashboardSummary.longitudinalAnalysisAvailable ? 'text-[#5EEAD4]' : 'text-[#F59E0B]'
                     }`}
                   >
-                    {dashboardSummary.longitudinalAnalysisAvailable
-                      ? 'Available'
-                      : 'More repeated measurements are required'}
+                    {dashboardSummary.longitudinalAnalysisLabel}
                   </span>
                 </div>
               </div>
@@ -1276,11 +1368,15 @@ export const HealthView: React.FC<HealthViewProps> = ({ reading, facilities = []
                               })}
                             </span>
                             <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-[#0F766E]/30 text-[#5EEAD4] shrink-0 whitespace-nowrap">
-                              OPTICAL RECORD
+                              {m.dataStatus === 'Calibrated measurement'
+                                ? 'CALIBRATED MEASUREMENT'
+                                : m.dataStatus === 'Image captured'
+                                ? 'IMAGE CAPTURED'
+                                : 'EXPERIMENTAL OBSERVATION'}
                             </span>
                           </div>
                           <p className="text-[10px] text-slate-400 truncate mt-0.5">
-                            AQI: {m.environmentalMeasurements?.measurements.aqi ?? 'N/A'} (PM2.5: {m.environmentalMeasurements?.measurements.pm2_5 ?? 'N/A'} µg/m³) · {m.location?.name || 'Local Site'}
+                            AQI: {m.environmentalMeasurements?.measurements.aqi ?? 'Unavailable'} (PM2.5: {m.environmentalMeasurements?.measurements.pm2_5 ?? 'Unavailable'} µg/m³) · {m.location?.name || 'Local Site'}
                           </p>
                         </div>
                         <span className="text-[10px] font-mono text-[#5EEAD4] bg-[#0F766E]/20 px-2 py-0.5 rounded-full border border-[#0F766E]/40 shrink-0 whitespace-nowrap">

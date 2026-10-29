@@ -85,9 +85,9 @@ export function getAQICategory(aqi: number): {
   }
   return {
     category: 'Hazardous',
-    color: '#881337', // Maroon Hazard
-    bg: 'rgba(136, 19, 55, 0.2)',
-    border: 'rgba(136, 19, 55, 0.4)',
+    color: '#FB7185', // High-contrast Vivid Maroon/Rose for dark backgrounds
+    bg: 'rgba(225, 29, 72, 0.16)',
+    border: 'rgba(251, 113, 133, 0.4)',
     description: 'Health warning of emergency conditions: Everyone is significantly more likely to be affected.',
   };
 }
@@ -188,7 +188,16 @@ export const airQualityService = {
 
       const url = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&hourly=${hourlyVars}&current=${currentVars}&timezone=auto&forecast_days=5`;
 
-      const response = await fetch(url);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      let response: Response;
+      try {
+        response = await fetch(url, { signal: controller.signal });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
       if (!response.ok) {
         throw new Error(`Open-Meteo responded with HTTP status ${response.status}`);
       }
@@ -210,10 +219,23 @@ export const airQualityService = {
         if (matchIdx !== -1) currentIndex = matchIdx;
       }
 
-      // Extract official US AQI
-      const rawAqi = current.us_aqi ?? hourly.us_aqi?.[currentIndex] ?? 0;
-      const aqiValue = Math.round(Number(rawAqi));
+      // Extract official US AQI - strictly distinguish genuine 0 from missing/null data
+      let rawAqi: number | null = null;
+      if (typeof current.us_aqi === 'number' && !isNaN(current.us_aqi)) {
+        rawAqi = current.us_aqi;
+      } else if (
+        typeof hourly.us_aqi?.[currentIndex] === 'number' &&
+        !isNaN(hourly.us_aqi[currentIndex])
+      ) {
+        rawAqi = hourly.us_aqi[currentIndex];
+      }
 
+      // Never substitute 0 for missing telemetry
+      if (rawAqi === null) {
+        throw new Error('Open-Meteo did not return valid US AQI telemetry for this location.');
+      }
+
+      const aqiValue = Math.round(rawAqi);
       const catInfo = getAQICategory(aqiValue);
 
       // Pollutants: PM10, PM2.5, CO2, CO, NO2, O3, SO2
@@ -260,9 +282,15 @@ export const airQualityService = {
       const forecastLen = times.length; // Full returned forecast up to 7 days
 
       for (let i = 0; i < forecastLen; i++) {
+        const rawPointAqi = hourly.us_aqi?.[i];
+        // Do not fabricate 0 for missing points in forecast
+        if (rawPointAqi === null || rawPointAqi === undefined || isNaN(rawPointAqi)) {
+          continue;
+        }
+
         const pointTime = times[i];
         const dateObj = new Date(pointTime);
-        const pointAqi = Math.round(Number(hourly.us_aqi?.[i] ?? 0));
+        const pointAqi = Math.round(Number(rawPointAqi));
         const pointCat = getAQICategory(pointAqi);
 
         forecast.push({

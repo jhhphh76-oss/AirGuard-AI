@@ -28,8 +28,14 @@ class EnvironmentalDataService {
       return null;
     }
 
+    // Do not fabricate current timestamp if reading has no timestamp
+    const genuineTimestamp =
+      reading.timestamp && typeof reading.timestamp === 'string' && reading.timestamp.trim().length > 0
+        ? reading.timestamp.trim()
+        : '';
+
     return {
-      timestamp: reading.timestamp || new Date().toISOString(),
+      timestamp: genuineTimestamp,
       opticalMeasurementTimestamp: opticalTimestamp,
       locationName: reading.location.name,
       coordinates: {
@@ -57,26 +63,26 @@ class EnvironmentalDataService {
     opticalTimestamp: number,
     envSnapshot: EnvironmentalSnapshot | null
   ): TimeAlignmentInfo {
-    if (!envSnapshot || !envSnapshot.timestamp) {
+    if (!envSnapshot || !envSnapshot.timestamp || envSnapshot.timestamp.trim() === '') {
       return {
         opticalTimestamp,
         environmentalTimestamp: null,
         differenceMinutes: null,
         isAligned: false,
-        alignmentStatus: 'Environmental data unavailable for this measurement',
+        alignmentStatus: 'Unavailable',
       };
     }
 
     const envDate = new Date(envSnapshot.timestamp);
     const envEpoch = envDate.getTime();
 
-    if (isNaN(envEpoch)) {
+    if (isNaN(envEpoch) || !opticalTimestamp || isNaN(opticalTimestamp) || opticalTimestamp <= 0) {
       return {
         opticalTimestamp,
         environmentalTimestamp: envSnapshot.timestamp,
         differenceMinutes: null,
         isAligned: false,
-        alignmentStatus: 'Environmental data unavailable for this measurement',
+        alignmentStatus: 'Unverified',
       };
     }
 
@@ -92,8 +98,8 @@ class EnvironmentalDataService {
       differenceMinutes,
       isAligned,
       alignmentStatus: isAligned
-        ? 'Time-aligned'
-        : 'Environmental measurement is not sufficiently time-aligned',
+        ? 'Verified'
+        : 'Unverified',
     };
   }
 }

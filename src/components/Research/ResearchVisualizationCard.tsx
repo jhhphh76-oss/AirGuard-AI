@@ -114,13 +114,25 @@ export const ResearchVisualizationCard: React.FC<ResearchVisualizationCardProps>
     }
   };
 
-  // Data status badge helper (Requirements 2, 3, 7)
+  // Data status badge helper (Requirements 1 & 5: Genuine measurement labels)
   const renderDataStatusBadge = () => {
     switch (dataStatus) {
-      case 'REAL MEASUREMENT':
+      case 'Calibrated measurement':
         return (
           <span className="shrink-0 whitespace-nowrap px-2.5 py-1 rounded-full text-[10px] font-mono font-extrabold bg-[#22C55E]/20 text-[#22C55E] border border-[#22C55E]">
-            ● REAL ACQUISITION
+            ● CALIBRATED MEASUREMENT
+          </span>
+        );
+      case 'Experimental observation':
+        return (
+          <span className="shrink-0 whitespace-nowrap px-2.5 py-1 rounded-full text-[10px] font-mono font-extrabold bg-[#06B6D4]/20 text-[#5EEAD4] border border-[#06B6D4]/60">
+            EXPERIMENTAL OBSERVATION
+          </span>
+        );
+      case 'Image captured':
+        return (
+          <span className="shrink-0 whitespace-nowrap px-2.5 py-1 rounded-full text-[10px] font-mono font-extrabold bg-slate-800 text-slate-300 border border-slate-700">
+            IMAGE CAPTURED
           </span>
         );
       case 'RGB IMAGE ONLY':
@@ -141,11 +153,12 @@ export const ResearchVisualizationCard: React.FC<ResearchVisualizationCardProps>
             ⚠ INCOMPLETE DATA
           </span>
         );
+      case 'REAL MEASUREMENT':
       case 'SIMULATED DATA':
       default:
         return (
-          <span className="shrink-0 whitespace-nowrap px-2.5 py-1 rounded-full text-[10px] font-mono font-extrabold bg-[#0F766E]/20 text-[#5EEAD4] border border-[#0F766E]/60">
-            OPTICAL CAMERA RECORD
+          <span className="shrink-0 whitespace-nowrap px-2.5 py-1 rounded-full text-[10px] font-mono font-extrabold bg-[#06B6D4]/20 text-[#5EEAD4] border border-[#06B6D4]/60">
+            EXPERIMENTAL OBSERVATION
           </span>
         );
     }
@@ -215,8 +228,12 @@ export const ResearchVisualizationCard: React.FC<ResearchVisualizationCardProps>
               </span>
               <span
                 className={`shrink-0 whitespace-nowrap font-bold px-2 py-0.5 rounded-md ${
-                  dataQuality.cameraAcquisition === 'Good'
+                  dataQuality.cameraAcquisition === 'Acquired' || dataQuality.cameraAcquisition === 'Good'
                     ? 'text-[#22C55E] bg-[#22C55E]/15 border border-[#22C55E]/30'
+                    : dataQuality.cameraAcquisition === 'Gallery upload'
+                    ? 'text-[#06B6D4] bg-[#06B6D4]/15 border border-[#06B6D4]/30'
+                    : dataQuality.cameraAcquisition === 'Permission blocked'
+                    ? 'text-[#EF4444] bg-[#EF4444]/15 border border-[#EF4444]/30'
                     : 'text-[#F59E0B] bg-[#F59E0B]/15 border border-[#F59E0B]/30'
                 }`}
               >
@@ -226,13 +243,15 @@ export const ResearchVisualizationCard: React.FC<ResearchVisualizationCardProps>
 
             <div className="p-2.5 rounded-xl bg-[#071A24] border border-slate-800 flex items-center justify-between gap-2">
               <span className="text-slate-300 min-w-0 flex-1 break-words sm:truncate text-[11px]">
-                Calibration
+                Calibration Quality
               </span>
               <span
                 className={`shrink-0 whitespace-nowrap font-bold px-2 py-0.5 rounded-md ${
-                  dataQuality.calibration === 'Valid'
+                  dataQuality.calibration === 'Calibrated' || dataQuality.calibration === 'Valid'
                     ? 'text-[#22C55E] bg-[#22C55E]/15 border border-[#22C55E]/30'
-                    : 'text-[#EF4444] bg-[#EF4444]/15 border border-[#EF4444]/30'
+                    : dataQuality.calibration === 'Calibration incomplete'
+                    ? 'text-[#F59E0B] bg-[#F59E0B]/15 border border-[#F59E0B]/30'
+                    : 'text-slate-400 bg-slate-800 border border-slate-700'
                 }`}
               >
                 {dataQuality.calibration}
@@ -245,7 +264,7 @@ export const ResearchVisualizationCard: React.FC<ResearchVisualizationCardProps>
               </span>
               <span
                 className={`shrink-0 whitespace-nowrap font-bold px-2 py-0.5 rounded-md ${
-                  dataQuality.faceSegmentation === 'Valid'
+                  dataQuality.faceSegmentation === 'Verified' || dataQuality.faceSegmentation === 'Valid'
                     ? 'text-[#22C55E] bg-[#22C55E]/15 border border-[#22C55E]/30'
                     : 'text-[#F59E0B] bg-[#F59E0B]/15 border border-[#F59E0B]/30'
                 }`}
@@ -290,9 +309,11 @@ export const ResearchVisualizationCard: React.FC<ResearchVisualizationCardProps>
               </span>
               <span
                 className={`shrink-0 whitespace-nowrap font-bold px-2 py-0.5 rounded-md ${
-                  dataQuality.timeAlignment === 'Valid'
+                  dataQuality.timeAlignment === 'Verified' || dataQuality.timeAlignment === 'Valid'
                     ? 'text-[#22C55E] bg-[#22C55E]/15 border border-[#22C55E]/30'
-                    : 'text-[#F59E0B] bg-[#F59E0B]/15 border border-[#F59E0B]/30'
+                    : dataQuality.timeAlignment === 'Unverified'
+                    ? 'text-[#F59E0B] bg-[#F59E0B]/15 border border-[#F59E0B]/30'
+                    : 'text-slate-400 bg-slate-800 border border-slate-700'
                 }`}
               >
                 {dataQuality.timeAlignment}
@@ -301,13 +322,15 @@ export const ResearchVisualizationCard: React.FC<ResearchVisualizationCardProps>
 
             <div className="p-2.5 rounded-xl bg-[#071A24] border border-slate-800 flex items-center justify-between gap-2 sm:col-span-2">
               <span className="text-slate-300 min-w-0 flex-1 break-words sm:truncate text-[11px]">
-                Longitudinal Data
+                Longitudinal Data Sufficiency
               </span>
               <span
                 className={`shrink-0 whitespace-nowrap font-bold px-2 py-0.5 rounded-md ${
                   dataQuality.longitudinalData === 'Sufficient'
                     ? 'text-[#22C55E] bg-[#22C55E]/15 border border-[#22C55E]/30'
-                    : 'text-[#F59E0B] bg-[#F59E0B]/15 border border-[#F59E0B]/30'
+                    : dataQuality.longitudinalData === 'Insufficient'
+                    ? 'text-[#F59E0B] bg-[#F59E0B]/15 border border-[#F59E0B]/30'
+                    : 'text-slate-400 bg-slate-800 border border-slate-700'
                 }`}
               >
                 {dataQuality.longitudinalData}
@@ -338,21 +361,38 @@ export const ResearchVisualizationCard: React.FC<ResearchVisualizationCardProps>
             </div>
             <div className="space-y-1 text-[10px] text-slate-300">
               <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-400 min-w-0 flex-1 truncate">Suitability:</span>
+                <span
+                  className={`font-mono shrink-0 whitespace-nowrap font-bold ${
+                    imageQuality.imageSuitability === 'Verified' ? 'text-[#22C55E]' : 'text-[#F59E0B]'
+                  }`}
+                >
+                  {imageQuality.imageSuitability ||
+                    (imageQuality.faceDetected ? 'Verified' : 'Image suitability not verified')}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
                 <span className="text-slate-400 min-w-0 flex-1 truncate">Exposure:</span>
                 <span className="font-mono text-white shrink-0 whitespace-nowrap">
                   {imageQuality.exposureQuality} (L: {imageQuality.meanLuminance}/255)
                 </span>
               </div>
               <div className="flex items-center justify-between gap-2">
-                <span className="text-slate-400 min-w-0 flex-1 truncate">Sharpness Metric:</span>
+                <span className="text-slate-400 min-w-0 flex-1 truncate">Sharpness:</span>
                 <span className="font-mono text-white shrink-0 whitespace-nowrap">
-                  {imageQuality.blurSharpnessScore} {imageQuality.isSharp ? '✓ (Adequate)' : '⚠ (Blurry)'}
+                  {imageQuality.isSharp ? 'Adequate' : 'Blurry'} (Variance: {imageQuality.blurSharpnessScore})
                 </span>
               </div>
               <div className="flex items-center justify-between gap-2">
-                <span className="text-slate-400 min-w-0 flex-1 truncate">Face Coverage:</span>
+                <span className="text-slate-400 min-w-0 flex-1 truncate">Face Target:</span>
                 <span className="font-mono text-white shrink-0 whitespace-nowrap">
-                  {imageQuality.usableFaceAreaPercent}% ({imageQuality.faceDetectionConfidence}% conf)
+                  {imageQuality.faceDetected ? 'Verified (Skin locus detected)' : 'Target unverified'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-400 min-w-0 flex-1 truncate">Resolution:</span>
+                <span className="font-mono text-white shrink-0 whitespace-nowrap">
+                  {imageQuality.resolution.width}×{imageQuality.resolution.height}
                 </span>
               </div>
             </div>
@@ -378,10 +418,10 @@ export const ResearchVisualizationCard: React.FC<ResearchVisualizationCardProps>
               className={`shrink-0 whitespace-nowrap px-2 py-0.5 rounded-full text-[10px] font-bold font-mono self-start sm:self-auto ${
                 calibration.isReady && calibration.normalized
                   ? 'bg-[#22C55E]/15 text-[#22C55E] border border-[#22C55E]/30'
-                  : 'bg-[#F59E0B]/15 text-[#F59E0B] border border-[#F59E0B]/30'
+                  : 'bg-slate-800 text-slate-400 border border-slate-700'
               }`}
             >
-              {calibration.isReady && calibration.normalized ? '✓ Complete' : '⚠ Incomplete'}
+              {calibration.statusLabel}
             </span>
           </div>
           <div className="space-y-1 text-[10px] font-mono">
@@ -510,15 +550,22 @@ export const ResearchVisualizationCard: React.FC<ResearchVisualizationCardProps>
             </h2>
           </div>
           {baselineComparison && (
-            <span
-              className={`shrink-0 whitespace-nowrap px-2 py-0.5 rounded-full text-[9px] font-mono font-bold self-start sm:self-auto ${
-                baselineComparison.baselineEstablished
-                  ? 'bg-[#38BDF8]/15 text-[#38BDF8] border border-[#38BDF8]/30'
-                  : 'bg-slate-800 text-slate-400'
-              }`}
-            >
-              {baselineComparison.variationCategory}
-            </span>
+            <div className="flex items-center flex-wrap gap-1.5 shrink-0 self-start sm:self-auto">
+              {baselineComparison.isExperimentalComparison && (
+                <span className="whitespace-nowrap px-2 py-0.5 rounded-full text-[9px] font-mono font-bold bg-[#06B6D4]/15 text-[#5EEAD4] border border-[#06B6D4]/30">
+                  Experimental image comparison
+                </span>
+              )}
+              <span
+                className={`whitespace-nowrap px-2 py-0.5 rounded-full text-[9px] font-mono font-bold ${
+                  baselineComparison.baselineEstablished
+                    ? 'bg-[#38BDF8]/15 text-[#38BDF8] border border-[#38BDF8]/30'
+                    : 'bg-slate-800 text-slate-400'
+                }`}
+              >
+                {baselineComparison.variationCategory}
+              </span>
+            </div>
           )}
         </div>
         <p className="text-[11px] text-slate-300 leading-relaxed break-words">
@@ -679,39 +726,39 @@ export const ResearchVisualizationCard: React.FC<ResearchVisualizationCardProps>
           <div className="space-y-2.5">
             {/* Real Open-Meteo Pollutants Grid */}
             <div className="grid grid-cols-4 gap-1.5 text-center font-mono">
-              <div className="p-2 rounded-xl bg-[#071A24] border border-slate-800 min-w-0">
+              <div className="p-2.5 rounded-xl bg-[#071A24] border border-slate-800 min-w-0">
                 <span className="text-[9px] text-slate-400 block truncate">PM2.5</span>
                 <span className="text-xs font-bold text-white block truncate">
                   {environmental.measurements.pm2_5 !== null
                     ? `${environmental.measurements.pm2_5}`
-                    : 'N/A'}
+                    : 'Unavailable'}
                 </span>
                 <span className="text-[8px] text-slate-500 block truncate">µg/m³</span>
               </div>
-              <div className="p-2 rounded-xl bg-[#071A24] border border-slate-800 min-w-0">
+              <div className="p-2.5 rounded-xl bg-[#071A24] border border-slate-800 min-w-0">
                 <span className="text-[9px] text-slate-400 block truncate">PM10</span>
                 <span className="text-xs font-bold text-white block truncate">
                   {environmental.measurements.pm10 !== null
                     ? `${environmental.measurements.pm10}`
-                    : 'N/A'}
+                    : 'Unavailable'}
                 </span>
                 <span className="text-[8px] text-slate-500 block truncate">µg/m³</span>
               </div>
-              <div className="p-2 rounded-xl bg-[#071A24] border border-slate-800 min-w-0">
+              <div className="p-2.5 rounded-xl bg-[#071A24] border border-slate-800 min-w-0">
                 <span className="text-[9px] text-slate-400 block truncate">O₃</span>
                 <span className="text-xs font-bold text-white block truncate">
                   {environmental.measurements.o3 !== null
                     ? `${environmental.measurements.o3}`
-                    : 'N/A'}
+                    : 'Unavailable'}
                 </span>
                 <span className="text-[8px] text-slate-500 block truncate">µg/m³</span>
               </div>
-              <div className="p-2 rounded-xl bg-[#071A24] border border-slate-800 min-w-0">
+              <div className="p-2.5 rounded-xl bg-[#071A24] border border-slate-800 min-w-0">
                 <span className="text-[9px] text-slate-400 block truncate">NO₂</span>
                 <span className="text-xs font-bold text-white block truncate">
                   {environmental.measurements.no2 !== null
                     ? `${environmental.measurements.no2}`
-                    : 'N/A'}
+                    : 'Unavailable'}
                 </span>
                 <span className="text-[8px] text-slate-500 block truncate">µg/m³</span>
               </div>
@@ -749,7 +796,7 @@ export const ResearchVisualizationCard: React.FC<ResearchVisualizationCardProps>
                   >
                     {timeAlignment.differenceMinutes !== null
                       ? `${timeAlignment.differenceMinutes} minutes`
-                      : 'N/A'}
+                      : 'Unavailable'}
                   </span>
                 </div>
                 {!timeAlignment.isAligned && (

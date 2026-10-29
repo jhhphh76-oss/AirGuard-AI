@@ -31,6 +31,7 @@ import {
   DataQualityPanelStatus,
   ResearchMeasurementRecord,
   AcquisitionMode,
+  MeasurementDataStatus,
 } from '../../services/research/types';
 import { calibrationService } from '../../services/research/calibrationService';
 import { spectralDataService } from '../../services/research/spectralDataService';
@@ -253,12 +254,9 @@ export const AirGuardianCameraModal: React.FC<AirGuardianCameraModalProps> = ({
     setAnalysisError(null);
 
     try {
-      // Step A: Ensure standard calibration references are ready
-      let currentCalib = calibrationService.getStatus();
-      if (!currentCalib.isReady) {
-        currentCalib = calibrationService.applyStandardReferences();
-        setCalibration(currentCalib);
-      }
+      // Step A: Check genuine calibration status without fabricating references
+      const currentCalib = calibrationService.getStatus();
+      setCalibration(currentCalib);
 
       // Step B: Load image onto canvas
       const img = new Image();
@@ -285,11 +283,10 @@ export const AirGuardianCameraModal: React.FC<AirGuardianCameraModalProps> = ({
       const segmentation = faceSegmentationService.evaluateSegmentation(canvas);
       setConfidenceScore(segmentation.confidenceScore);
 
-      // Step E: Compute Image Quality Metrics (Requirement 4)
+      // Step E: Compute Image Quality Metrics (genuine, explainable checks)
       const metrics = imageQualityService.evaluateImageQuality(
         canvas,
-        segmentation.confidenceScore,
-        0.35
+        segmentation.confidenceScore
       );
       setImageQuality(metrics);
 
@@ -320,7 +317,10 @@ export const AirGuardianCameraModal: React.FC<AirGuardianCameraModalProps> = ({
         segmentation.confidenceScore,
         envSnapshot,
         alignment,
-        sessionIndex
+        sessionIndex,
+        hardware.multispectralSensorConnected,
+        acquisitionMode,
+        permissionDenied
       );
       setDataQuality(dqStatus);
 
@@ -335,7 +335,21 @@ export const AirGuardianCameraModal: React.FC<AirGuardianCameraModalProps> = ({
       );
       setInterpretation(researchInterpretation);
 
-      // Step L: Build Complete Structured Measurement Record (Requirement 2)
+      // Step L: Distinguish Measurement Label according to genuine system performance
+      let measurementStatus: MeasurementDataStatus = 'Experimental observation';
+      if (!segmentation.isConfident || metrics.qualityCategory !== 'Good') {
+        measurementStatus = 'Image captured';
+      } else if (
+        currentCalib.isReady &&
+        currentCalib.normalized &&
+        hardware.multispectralSensorConnected
+      ) {
+        measurementStatus = 'Calibrated measurement';
+      } else {
+        measurementStatus = 'Experimental observation';
+      }
+
+      // Step M: Build Complete Structured Measurement Record
       const record: ResearchMeasurementRecord = {
         id: `meas_${opticalCaptureTime}_${Math.random().toString(36).substring(2, 7)}`,
         timestamp: opticalCaptureTime,
@@ -350,7 +364,7 @@ export const AirGuardianCameraModal: React.FC<AirGuardianCameraModalProps> = ({
         opticalFeatures: regionalFeatures,
         environmentalMeasurements: envSnapshot,
         analysis: researchInterpretation,
-        dataStatus: 'REAL MEASUREMENT',
+        dataStatus: measurementStatus,
         timeAlignment: alignment,
         baselineComparison: baselineComp,
         dataQuality: dqStatus,
@@ -597,31 +611,60 @@ export const AirGuardianCameraModal: React.FC<AirGuardianCameraModalProps> = ({
               <div className="relative w-full aspect-square max-h-72 bg-black rounded-3xl overflow-hidden border border-slate-700 flex items-center justify-center shadow-inner">
                 <img
                   src={capturedDataUrl}
-                  alt="Captured skin reference"
+                  alt="Captured observation reference"
                   className="w-full h-full object-cover"
                 />
-                <div className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full bg-black/60 text-[9px] font-mono text-[#5EEAD4] border border-[#0F766E]">
-                  Skin Target Acquired ({acquisitionMode === 'live_camera' ? 'Camera' : 'Gallery'})
+                <div className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full bg-black/75 text-[9px] font-mono text-[#5EEAD4] border border-[#0F766E]">
+                  {acquisitionMode === 'live_camera' ? 'Image captured via camera' : 'Image selected from gallery'}
                 </div>
+                {imageQuality && !imageQuality.faceDetected && (
+                  <div className="absolute bottom-2.5 left-2.5 right-2.5 px-2.5 py-1.5 rounded-xl bg-black/85 text-[10px] font-mono text-[#F59E0B] border border-[#F59E0B]/50 flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-[#F59E0B]" />
+                    <span>Image suitability not verified: No facial skin target detected.</span>
+                  </div>
+                )}
               </div>
 
-              {/* Preliminary Image Quality Feedback (Requirement 4) */}
+              {/* Preliminary Image Quality & Suitability Feedback */}
               {imageQuality && (
-                <div className="p-3 rounded-2xl bg-[#09212D] border border-slate-800 space-y-1.5">
+                <div className="p-3 rounded-2xl bg-[#09212D] border border-slate-800 space-y-2">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-white font-mono uppercase">Image Quality:</span>
+                    <span className="font-bold text-white font-mono uppercase">Image Validation:</span>
                     <span
                       className={`font-mono font-bold px-2 py-0.5 rounded-full text-[10px] ${
-                        imageQuality.qualityCategory === 'Good'
+                        imageQuality.imageSuitability === 'Verified'
                           ? 'bg-[#22C55E]/15 text-[#22C55E] border border-[#22C55E]/30'
                           : 'bg-[#F59E0B]/15 text-[#F59E0B] border border-[#F59E0B]/30'
                       }`}
                     >
-                      {imageQuality.qualityCategory}
+                      {imageQuality.imageSuitability}
                     </span>
                   </div>
+
+                  {/* 4-Stage Observation Validation State Check */}
+                  <div className="space-y-1 text-[10px] font-mono pt-1 border-t border-slate-800">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">1. Image Source:</span>
+                      <span className="text-white">
+                        {acquisitionMode === 'live_camera' ? 'Camera Captured' : 'Gallery Upload'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">2. Technical Quality:</span>
+                      <span className={imageQuality.isSharp ? 'text-[#22C55E]' : 'text-[#F59E0B]'}>
+                        {imageQuality.exposureQuality} · {imageQuality.isSharp ? 'Adequate sharpness' : 'Blurry'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">3. Region Detected:</span>
+                      <span className={imageQuality.faceDetected ? 'text-[#22C55E]' : 'text-[#F59E0B]'}>
+                        {imageQuality.faceDetected ? 'Facial skin locus verified' : 'Not detected'}
+                      </span>
+                    </div>
+                  </div>
+
                   {imageQuality.issues.length > 0 && (
-                    <div className="text-[10px] text-[#F59E0B] space-y-0.5 pt-0.5">
+                    <div className="text-[10px] text-[#F59E0B] space-y-0.5 pt-1 border-t border-slate-800/80">
                       {imageQuality.issues.map((iss, i) => (
                         <p key={i}>• {iss}</p>
                       ))}
@@ -692,7 +735,7 @@ export const AirGuardianCameraModal: React.FC<AirGuardianCameraModalProps> = ({
                 timeAlignment={timeAlignment || undefined}
                 baselineComparison={baselineComparison || undefined}
                 dataQuality={dataQuality || undefined}
-                dataStatus="REAL MEASUREMENT"
+                dataStatus={currentMeasurementRecord?.dataStatus || 'Experimental observation'}
                 onSaveToHistory={handleSaveToTimeline}
                 isSaved={isSavedToTimeline}
                 onDeleteImage={capturedDataUrl ? handleDeletePhoto : undefined}

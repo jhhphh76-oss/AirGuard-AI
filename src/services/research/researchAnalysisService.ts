@@ -38,10 +38,16 @@ const LEGACY_STORAGE_KEY = 'airguard_multispectral_research_history';
 const BASELINE_STORAGE_KEY = 'airguard_research_personal_baseline';
 
 class ResearchAnalysisService {
+  private memoryMeasurements: ResearchMeasurementRecord[] = [];
+  private memoryBaseline: PersonalBaselineRecord | null = null;
+
   /**
    * Retrieve all preserved research measurement records
    */
   public getMeasurements(): ResearchMeasurementRecord[] {
+    if (typeof localStorage === 'undefined') {
+      return [...this.memoryMeasurements].sort((a, b) => b.timestamp - a.timestamp);
+    }
     try {
       const data = localStorage.getItem(MEASUREMENTS_STORAGE_KEY);
       if (data) {
@@ -53,7 +59,7 @@ class ResearchAnalysisService {
     } catch (e) {
       console.warn('Failed to parse research measurements:', e);
     }
-    return [];
+    return [...this.memoryMeasurements].sort((a, b) => b.timestamp - a.timestamp);
   }
 
   /**
@@ -68,6 +74,9 @@ class ResearchAnalysisService {
    * Retrieve established Personal Baseline
    */
   public getPersonalBaseline(): PersonalBaselineRecord | null {
+    if (typeof localStorage === 'undefined') {
+      return this.memoryBaseline;
+    }
     try {
       const data = localStorage.getItem(BASELINE_STORAGE_KEY);
       if (data) {
@@ -76,13 +85,15 @@ class ResearchAnalysisService {
     } catch (e) {
       console.warn('Failed to parse personal baseline:', e);
     }
-    return null;
+    return this.memoryBaseline;
   }
 
   /**
    * Set or update Personal Baseline
    */
   public setPersonalBaseline(record: PersonalBaselineRecord): void {
+    this.memoryBaseline = record;
+    if (typeof localStorage === 'undefined') return;
     try {
       localStorage.setItem(BASELINE_STORAGE_KEY, JSON.stringify(record));
     } catch (e) {
@@ -94,6 +105,8 @@ class ResearchAnalysisService {
    * Clear Personal Baseline
    */
   public clearPersonalBaseline(): void {
+    this.memoryBaseline = null;
+    if (typeof localStorage === 'undefined') return;
     try {
       localStorage.removeItem(BASELINE_STORAGE_KEY);
     } catch (e) {
@@ -145,20 +158,42 @@ class ResearchAnalysisService {
     let totalDelta = 0;
     let maxDelta = 0;
     let highestRegion: FaceRegion = 'nose';
+    let validRegionCount = 0;
 
     regions.forEach((r) => {
-      const baseScore = baseline.regionalFeatures[r]?.variationScore ?? 0.05;
-      const currScore = currentFeatures[r]?.variationScore ?? 0.05;
-      const delta = Math.abs(currScore - baseScore);
-      totalDelta += delta;
-
-      if (delta > maxDelta) {
-        maxDelta = delta;
-        highestRegion = r;
+      const baseFeat = baseline.regionalFeatures[r];
+      const currFeat = currentFeatures[r];
+      if (
+        baseFeat &&
+        currFeat &&
+        typeof baseFeat.variationScore === 'number' &&
+        typeof currFeat.variationScore === 'number' &&
+        baseFeat.variationCategory !== 'Insufficient data' &&
+        currFeat.variationCategory !== 'Insufficient data'
+      ) {
+        const delta = Math.abs(currFeat.variationScore - baseFeat.variationScore);
+        totalDelta += delta;
+        validRegionCount++;
+        if (delta > maxDelta) {
+          maxDelta = delta;
+          highestRegion = r;
+        }
       }
     });
 
-    const averageOpticalShift = Math.round((totalDelta / regions.length) * 1000) / 1000;
+    if (validRegionCount === 0) {
+      return {
+        baselineEstablished: true,
+        baselineTimestamp: baseline.timestamp,
+        baselineLocationName: baseline.locationName,
+        variationCategory: 'Baseline comparison unavailable',
+        averageOpticalShift: null,
+        highestShiftRegion: null,
+        comparisonNotes: 'Regional optical data insufficient to compute baseline shift.',
+      };
+    }
+
+    const averageOpticalShift = Math.round((totalDelta / validRegionCount) * 1000) / 1000;
 
     let variationCategory: 'Minimal variation' | 'Moderate variation' | 'Higher variation' =
       'Minimal variation';
@@ -177,7 +212,8 @@ class ResearchAnalysisService {
       variationCategory,
       averageOpticalShift,
       highestShiftRegion: regionLabel,
-      comparisonNotes: `Measured ${variationCategory.toLowerCase()} against baseline from ${new Date(
+      isExperimentalComparison: true,
+      comparisonNotes: `Experimental image comparison (${variationCategory.toLowerCase()}) against personal baseline from ${new Date(
         baseline.timestamp
       ).toLocaleDateString()}. Highest optical shift observed in ${regionLabel} (delta: ${maxDelta.toFixed(
         3
@@ -193,16 +229,25 @@ class ResearchAnalysisService {
     const existing = this.getMeasurements();
     // Prepend new record
     const updated = [record, ...existing.filter((r) => r.id !== record.id)];
+    this.memoryMeasurements = updated;
 
-    try {
-      localStorage.setItem(MEASUREMENTS_STORAGE_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.warn('Failed to save research measurement:', e);
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem(MEASUREMENTS_STORAGE_KEY, JSON.stringify(updated));
+      } catch (e) {
+        console.warn('Failed to save research measurement:', e);
+      }
     }
 
-    // Auto-establish first valid measurement as baseline if no baseline exists yet
+    // Auto-establish first valid skin observation as baseline if no baseline exists yet
+    // A baseline can exist without calibration, but must be a genuine skin observation (not an unverified image/drawing)
     const currentBaseline = this.getPersonalBaseline();
-    if (!currentBaseline && record.dataStatus !== 'INCOMPLETE DATA') {
+    if (
+      !currentBaseline &&
+      record.dataStatus !== 'INCOMPLETE DATA' &&
+      record.imageQuality?.faceDetected &&
+      record.imageQuality?.qualityCategory === 'Good'
+    ) {
       const newBaseline: PersonalBaselineRecord = {
         id: `baseline_${Date.now()}`,
         measurementId: record.id,
@@ -224,10 +269,13 @@ class ResearchAnalysisService {
   public deleteMeasurement(id: string): void {
     const existing = this.getMeasurements();
     const filtered = existing.filter((m) => m.id !== id);
-    try {
-      localStorage.setItem(MEASUREMENTS_STORAGE_KEY, JSON.stringify(filtered));
-    } catch (e) {
-      console.warn('Failed to delete measurement:', e);
+    this.memoryMeasurements = filtered;
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem(MEASUREMENTS_STORAGE_KEY, JSON.stringify(filtered));
+      } catch (e) {
+        console.warn('Failed to delete measurement:', e);
+      }
     }
 
     // If deleted measurement was baseline, clear baseline
@@ -251,11 +299,14 @@ class ResearchAnalysisService {
       }
       return m;
     });
+    this.memoryMeasurements = updated;
 
-    try {
-      localStorage.setItem(MEASUREMENTS_STORAGE_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.warn('Failed to delete image for measurement:', e);
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem(MEASUREMENTS_STORAGE_KEY, JSON.stringify(updated));
+      } catch (e) {
+        console.warn('Failed to delete image for measurement:', e);
+      }
     }
   }
 
@@ -263,12 +314,16 @@ class ResearchAnalysisService {
    * Clear all research measurements and history (Requirement 19 - Privacy)
    */
   public clearAllMeasurements(): void {
-    try {
-      localStorage.removeItem(MEASUREMENTS_STORAGE_KEY);
-      localStorage.removeItem(LEGACY_STORAGE_KEY);
-      localStorage.removeItem(BASELINE_STORAGE_KEY);
-    } catch (e) {
-      console.warn('Failed to clear research measurements:', e);
+    this.memoryMeasurements = [];
+    this.memoryBaseline = null;
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.removeItem(MEASUREMENTS_STORAGE_KEY);
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+        localStorage.removeItem(BASELINE_STORAGE_KEY);
+      } catch (e) {
+        console.warn('Failed to clear research measurements:', e);
+      }
     }
   }
 
@@ -281,16 +336,74 @@ class ResearchAnalysisService {
     segmentationConfidence: number,
     envSnapshot: EnvironmentalSnapshot | null,
     timeAlignment: TimeAlignmentInfo,
-    measurementCount: number
+    measurementCount: number,
+    multispectralHardwareConnected = false,
+    acquisitionMode?: 'live_camera' | 'gallery_upload',
+    permissionDenied = false
   ): DataQualityPanelStatus {
+    // Camera Acquisition: Reflect actual camera permission and capture result
+    let cameraAcq: 'Acquired' | 'Gallery upload' | 'Permission blocked' | 'Limited' = 'Limited';
+    if (permissionDenied) {
+      cameraAcq = 'Permission blocked';
+    } else if (acquisitionMode === 'gallery_upload') {
+      cameraAcq = 'Gallery upload';
+    } else if (imageQuality.qualityCategory === 'Good' && imageQuality.isSharp) {
+      cameraAcq = 'Acquired';
+    } else {
+      cameraAcq = 'Limited';
+    }
+
+    // Calibration Quality: Show "Calibrated" only when a supported calibration procedure has actually completed and passed
+    let calibStatus: 'Calibrated' | 'Calibration incomplete' | 'Not calibrated' = 'Not calibrated';
+    if (calibration.isReady && calibration.normalized) {
+      calibStatus = 'Calibrated';
+    } else if (calibration.darkCaptured || calibration.whiteCaptured || calibration.skinCaptured) {
+      calibStatus = 'Calibration incomplete';
+    } else {
+      calibStatus = 'Not calibrated';
+    }
+
+    // Face Segmentation: Show "Verified" when skin locus target detected and adequate confidence
+    const faceSegStatus: 'Verified' | 'Unverified' =
+      imageQuality.faceDetected && segmentationConfidence >= 35 ? 'Verified' : 'Unverified';
+
+    // Spectral Data: Show "Available" only when genuine spectral measurements exist. Ordinary RGB image is not spectral data.
+    const spectralStatus: 'Available' | 'Unavailable' = multispectralHardwareConnected
+      ? 'Available'
+      : 'Unavailable';
+
+    // Time Alignment: Show "Verified" only when actual timestamps and required alignment checks pass
+    let timeAlignmentStatus: 'Verified' | 'Unverified' | 'Unavailable' = 'Unavailable';
+    if (timeAlignment.isAligned) {
+      timeAlignmentStatus = 'Verified';
+    } else if (
+      timeAlignment.environmentalTimestamp &&
+      timeAlignment.environmentalTimestamp.trim() !== ''
+    ) {
+      timeAlignmentStatus = 'Unverified';
+    } else {
+      timeAlignmentStatus = 'Unavailable';
+    }
+
+    // Longitudinal Data Sufficiency: Derive from actual number and quality of saved observations and documented criteria
+    let longitudinalDataStatus: 'Sufficient' | 'Insufficient' | 'Not yet assessed' = 'Not yet assessed';
+    if (measurementCount === 0) {
+      longitudinalDataStatus = 'Not yet assessed';
+    } else if (measurementCount >= 3 && imageQuality.qualityCategory === 'Good' && imageQuality.faceDetected) {
+      longitudinalDataStatus = 'Sufficient';
+    } else {
+      longitudinalDataStatus = 'Insufficient';
+    }
+
     return {
-      cameraAcquisition: imageQuality.qualityCategory === 'Good' ? 'Good' : 'Limited',
-      calibration: calibration.isReady && calibration.normalized ? 'Valid' : 'Incomplete',
-      faceSegmentation: segmentationConfidence >= 55 ? 'Valid' : 'Limited',
-      spectralData: 'Available',
-      environmentalData: envSnapshot && envSnapshot.measurements.aqi !== null ? 'Available' : 'Unavailable',
-      timeAlignment: timeAlignment.isAligned ? 'Valid' : 'Limited',
-      longitudinalData: measurementCount >= 2 ? 'Sufficient' : 'Insufficient',
+      cameraAcquisition: cameraAcq,
+      calibration: calibStatus,
+      faceSegmentation: faceSegStatus,
+      spectralData: spectralStatus,
+      environmentalData:
+        envSnapshot && envSnapshot.measurements.aqi !== null ? 'Available' : 'Unavailable',
+      timeAlignment: timeAlignmentStatus,
+      longitudinalData: longitudinalDataStatus,
     };
   }
 
@@ -307,7 +420,7 @@ class ResearchAnalysisService {
     totalHistoryCount: number
   ): QualifiedResearchInterpretation {
     const disclaimer =
-      'AirGuardian optical skin research is an experimental prototype. It does not diagnose medical conditions or prove that environmental exposure caused an observed biological change.';
+      'AirGuardian optical skin research is an experimental prototype. Ordinary RGB camera images cannot establish calibrated spectral measurements, skin damage, or pollution-caused biological effects. It does not diagnose medical conditions or prove that environmental exposure caused an observed biological change.';
 
     const locationName = currentEnv?.locationName || 'Monitored Site';
     const aqi = currentEnv?.measurements.aqi;
@@ -334,7 +447,7 @@ class ResearchAnalysisService {
     // 1. DATA
     const envDataStr =
       aqi !== null && aqi !== undefined
-        ? `Ambient Open-Meteo AQI is ${aqi} (PM2.5: ${pm25 ?? 'N/A'} µg/m³)`
+        ? `Ambient Open-Meteo AQI is ${aqi} (PM2.5: ${pm25 ?? 'Unavailable'} µg/m³)`
         : 'Environmental sensor telemetry is currently unavailable';
     const alignStr = timeAlignment.isAligned
       ? `time alignment within ${timeAlignment.differenceMinutes ?? 0}m`
@@ -384,7 +497,7 @@ class ResearchAnalysisService {
 
     // 5. LIMITATION (Requirement 12 & 16: Distinguish CORRELATION from CAUSATION)
     const limitationText =
-      'This association does not establish that PM2.5 or other air pollutants caused the optical change. Non-environmental variables including room illumination, skin hydration, and camera sensor temperature influence optical reflectance.';
+      'This association does not establish that PM2.5 or other air pollutants caused the optical change. Non-environmental variables including room illumination, skin hydration, and camera sensor temperature influence optical reflectance. Ordinary RGB phone or webcam images cannot establish calibrated spectral measurements, skin damage, or pollution-caused biological effects.';
 
     return {
       data: dataText,
@@ -404,18 +517,93 @@ class ResearchAnalysisService {
     const list = this.getMeasurements();
     const baseline = this.getPersonalBaseline();
     const count = list.length;
-    const validCalibCount = list.filter((m) => m.calibration.isReady).length;
+    const validCalibCount = list.filter((m) => m.calibration?.isReady && m.calibration?.normalized).length;
     const validEnvCount = list.filter(
       (m) => m.environmentalMeasurements && m.environmentalMeasurements.measurements.aqi !== null
     ).length;
+    const alignedTimeCount = list.filter((m) => m.timeAlignment?.isAligned).length;
+
+    // Calibration Quality: Show "Calibrated" only when a supported calibration procedure has actually completed and passed.
+    // Otherwise show "Calibration incomplete" or "Not calibrated."
+    let calibrationQuality: 'Calibrated' | 'Calibration incomplete' | 'Not calibrated' = 'Not calibrated';
+    if (count > 0) {
+      if (validCalibCount > 0 && validCalibCount === count) {
+        calibrationQuality = 'Calibrated';
+      } else if (
+        validCalibCount > 0 ||
+        list.some((m) => m.calibration?.darkCaptured || m.calibration?.whiteCaptured || m.calibration?.skinCaptured)
+      ) {
+        calibrationQuality = 'Calibration incomplete';
+      } else {
+        calibrationQuality = 'Not calibrated';
+      }
+    }
+
+    // Personal Baseline: Show "Established" only when a baseline session was genuinely captured and saved. Otherwise show "Not established."
+    const personalBaselineStatus: 'Established' | 'Not established' = baseline ? 'Established' : 'Not established';
+
+    // Spectral Data: Show "Available" only when genuine spectral measurements exist. Ordinary RGB camera image is not spectral data.
+    const spectralDataStatus: 'Available' | 'Unavailable' = list.some(
+      (m) => m.cubeBandsCount > 0 && m.dataStatus === 'Calibrated measurement'
+    )
+      ? 'Available'
+      : 'Unavailable';
+
+    // Time Alignment: Show "Verified" only when actual timestamps and required alignment checks pass. Otherwise show "Unverified" or "Unavailable."
+    let timeAlignmentSummary: 'Verified' | 'Unverified' | 'Unavailable' = 'Unavailable';
+    if (count > 0) {
+      if (alignedTimeCount === count && count > 0) {
+        timeAlignmentSummary = 'Verified';
+      } else if (alignedTimeCount > 0 || list.some((m) => m.timeAlignment?.environmentalTimestamp)) {
+        timeAlignmentSummary = 'Unverified';
+      } else {
+        timeAlignmentSummary = 'Unavailable';
+      }
+    }
+
+    // Longitudinal Data Sufficiency: Derive this status from the actual number and quality of saved observations and documented criteria.
+    // Do not automatically display "Sufficient." If criteria are not defined or not assessed, show "Not yet assessed" instead.
+    // Documented criteria: Minimum 3 quality sessions with verified face detection and time-aligned environmental data.
+    let longitudinalSufficiency: 'Sufficient' | 'Insufficient' | 'Not yet assessed' = 'Not yet assessed';
+    if (count === 0) {
+      longitudinalSufficiency = 'Not yet assessed';
+    } else {
+      const qualitySessions = list.filter(
+        (m) =>
+          m.imageQuality?.qualityCategory === 'Good' &&
+          m.imageQuality?.faceDetected &&
+          m.timeAlignment?.isAligned
+      ).length;
+      if (qualitySessions >= 3) {
+        longitudinalSufficiency = 'Sufficient';
+      } else {
+        longitudinalSufficiency = 'Insufficient';
+      }
+    }
+
+    // Longitudinal Analysis: Allow comparisons of genuine saved observations across sessions, even when calibration is incomplete,
+    // but clearly label the results as experimental image comparisons when appropriate.
+    let longitudinalAnalysisLabel = 'More repeated observations required';
+    if (count >= 2) {
+      if (validCalibCount > 0) {
+        longitudinalAnalysisLabel = 'Available (Calibrated)';
+      } else {
+        longitudinalAnalysisLabel = 'Available (Experimental image comparison)';
+      }
+    }
 
     return {
       measurementsCount: count,
       baselineEstablished: !!baseline,
+      personalBaselineStatus,
       baselineTimestamp: baseline?.timestamp ?? null,
-      calibrationQuality: count > 0 ? `${validCalibCount}/${count} valid` : 'Incomplete',
+      calibrationQuality,
+      spectralDataStatus,
+      timeAlignmentSummary,
       environmentalRecordsCount: count > 0 ? `${validEnvCount}/${count}` : '0/0',
       longitudinalAnalysisAvailable: count >= 2,
+      longitudinalAnalysisLabel,
+      longitudinalSufficiency,
     };
   }
 
@@ -448,8 +636,8 @@ class ResearchAnalysisService {
         dataSource: 'Unavailable',
       },
       regionalFeatures: m.opticalFeatures,
-      overallConfidence: m.imageQuality.faceDetectionConfidence,
-      isSimulated: m.dataStatus !== 'REAL MEASUREMENT',
+      overallConfidence: m.imageQuality.faceDetectionConfidence ?? 0,
+      isSimulated: m.dataStatus !== 'Calibrated measurement',
       notes: m.notes,
       measurementRecord: m,
     }));
@@ -497,16 +685,16 @@ class ResearchAnalysisService {
         `"${r.dataStatus}"`,
         `"${r.calibration.statusLabel}"`,
         `"${r.imageQuality.qualityCategory}"`,
-        r.imageQuality.faceDetectionConfidence,
-        `"${r.opticalFeatures.forehead?.variationCategory || 'N/A'}"`,
-        `"${r.opticalFeatures.nose?.variationCategory || 'N/A'}"`,
-        `"${r.opticalFeatures.left_cheek?.variationCategory || 'N/A'}"`,
-        `"${r.opticalFeatures.right_cheek?.variationCategory || 'N/A'}"`,
-        `"${r.opticalFeatures.chin?.variationCategory || 'N/A'}"`,
-        r.environmentalMeasurements?.measurements.aqi ?? 'N/A',
-        r.environmentalMeasurements?.measurements.pm2_5 ?? 'N/A',
-        r.environmentalMeasurements?.measurements.pm10 ?? 'N/A',
-        r.timeAlignment.differenceMinutes ?? 'N/A',
+        r.imageQuality.faceDetectionConfidence ?? 'Unavailable',
+        `"${r.opticalFeatures.forehead?.variationCategory || 'Unavailable'}"`,
+        `"${r.opticalFeatures.nose?.variationCategory || 'Unavailable'}"`,
+        `"${r.opticalFeatures.left_cheek?.variationCategory || 'Unavailable'}"`,
+        `"${r.opticalFeatures.right_cheek?.variationCategory || 'Unavailable'}"`,
+        `"${r.opticalFeatures.chin?.variationCategory || 'Unavailable'}"`,
+        r.environmentalMeasurements?.measurements.aqi ?? 'Unavailable',
+        r.environmentalMeasurements?.measurements.pm2_5 ?? 'Unavailable',
+        r.environmentalMeasurements?.measurements.pm10 ?? 'Unavailable',
+        r.timeAlignment.differenceMinutes ?? 'Unavailable',
         `"${r.baselineComparison.variationCategory}"`,
       ];
     });

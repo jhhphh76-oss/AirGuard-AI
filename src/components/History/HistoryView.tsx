@@ -5,6 +5,7 @@ import { notificationService } from '../../services/notificationService';
 import { researchAnalysisService } from '../../services/research/researchAnalysisService';
 import { ResearchMeasurementRecord } from '../../services/research/types';
 import { ResearchMeasurementModal } from '../Research/ResearchMeasurementModal';
+import { AQIHistoryCalendar } from './AQIHistoryCalendar';
 import {
   History,
   Trash2,
@@ -52,6 +53,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onNavigate, onOpenSett
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [airQualitySubView, setAirQualitySubView] = useState<'calendar' | 'timeline'>('calendar');
   const [notificationsEnabled, setNotificationsEnabled] = useState(
     () => notificationService.getSettings().enabled
   );
@@ -436,121 +438,181 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ onNavigate, onOpenSett
             )}
           </div>
 
-          {/* Visual History Trend Curve */}
-          <section className="p-4 rounded-3xl bg-[#09212D] border border-[#263238] space-y-2 shadow-lg">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono flex items-center gap-1.5">
-                <BarChart3 className="w-3.5 h-3.5 text-[#06B6D4]" />
-                <span>Recorded AQI History Curve</span>
-              </h2>
-              <span className="text-[10px] font-mono text-slate-400">
-                {chartRecords.length} points
-              </span>
+          {/* Sub-view switcher: AQI Calendar vs Trend Curve & List */}
+          <div className="grid grid-cols-2 gap-1.5 p-1 rounded-2xl bg-[#071A24] border border-slate-800">
+            <button
+              type="button"
+              onClick={() => setAirQualitySubView('calendar')}
+              className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                airQualitySubView === 'calendar'
+                  ? 'bg-[#0F766E]/40 text-[#5EEAD4] border border-[#06B6D4]/50 shadow-sm'
+                  : 'text-slate-400 hover:text-white border border-transparent'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5 text-[#06B6D4]" />
+              <span>AQI Calendar</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setAirQualitySubView('timeline')}
+              className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                airQualitySubView === 'timeline'
+                  ? 'bg-[#0F766E]/40 text-[#5EEAD4] border border-[#06B6D4]/50 shadow-sm'
+                  : 'text-slate-400 hover:text-white border border-transparent'
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5 text-[#06B6D4]" />
+              <span>Trend Curve & List</span>
+            </button>
+          </div>
+
+          {/* SUB-VIEW 1: AQI History Calendar */}
+          {airQualitySubView === 'calendar' ? (
+            <div className="space-y-4">
+              <AQIHistoryCalendar records={records} onRecordsChange={loadAllRecords} />
+
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => setAirQualitySubView('timeline')}
+                  className="w-full py-2.5 px-3 rounded-2xl bg-[#09212D]/60 hover:bg-[#09212D] border border-slate-800/80 hover:border-slate-700 text-slate-300 hover:text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <BarChart3 className="w-3.5 h-3.5 text-[#06B6D4]" />
+                  <span>View Recorded AQI History Curve & Full List →</span>
+                </button>
+              </div>
             </div>
-
-            {!hasEnoughRecords ? (
-              <div className="p-4 text-center rounded-2xl bg-[#071A24] border border-slate-800 space-y-1">
-                <p className="text-xs font-semibold text-slate-300">
-                  Not enough readings yet to chart a multi-point trend curve.
-                </p>
-                <p className="text-[10px] text-slate-500">
-                  Readings are saved automatically as you check air quality.
-                </p>
-              </div>
-            ) : (
-              <div className="w-full overflow-hidden select-none pt-1">
-                <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="w-full h-auto overflow-visible">
-                  <path
-                    d={pointsPath}
-                    fill="none"
-                    stroke="#06B6D4"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  {chartRecords.map((r, idx) => (
-                    <circle
-                      key={r.id}
-                      cx={getX(idx)}
-                      cy={getY(r.aqi)}
-                      r={3.5}
-                      fill="#5EEAD4"
-                      stroke="#071A24"
-                      strokeWidth="1.5"
-                    />
-                  ))}
-                </svg>
-                <div className="flex justify-between text-[9px] font-mono text-slate-500 px-2 pt-1 border-t border-slate-800 mt-1">
-                  <span>{chartRecords[0]?.date}</span>
-                  <span>{chartRecords[chartRecords.length - 1]?.date}</span>
+          ) : (
+            /* SUB-VIEW 2: Trend Curve & List */
+            <div className="space-y-4">
+              {/* Visual History Trend Curve */}
+              <section className="p-4 rounded-3xl bg-[#09212D] border border-[#263238] space-y-2 shadow-lg">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono flex items-center gap-1.5">
+                    <BarChart3 className="w-3.5 h-3.5 text-[#06B6D4]" />
+                    <span>Recorded AQI History Curve</span>
+                  </h2>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    {chartRecords.length} points
+                  </span>
                 </div>
-              </div>
-            )}
-          </section>
 
-          {/* AI Long-Term Trend Summary */}
-          {hasEnoughRecords && (
-            <section className="p-3.5 rounded-2xl bg-[#09212D] border border-[#263238] space-y-1.5 shadow-md">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-3.5 h-3.5 text-[#5EEAD4]" />
-                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-300">
-                  Exposure Trend Analysis
-                </span>
-              </div>
-              <p className="text-xs text-slate-200 leading-relaxed">
-                {trendExplanation}
-              </p>
-            </section>
-          )}
-
-          {/* Compact Recent Air Quality List */}
-          <section className="space-y-3">
-            <div className="px-1 flex items-center justify-between">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-300 font-mono">
-                Recent Air Quality
-              </h2>
-              <span className="text-[10px] font-mono text-slate-500">Compact list</span>
-            </div>
-
-            {records.length === 0 ? (
-              <div className="p-6 rounded-3xl bg-[#09212D]/60 border border-[#263238] text-center space-y-2">
-                <div className="w-10 h-10 rounded-2xl bg-[#0F766E]/20 text-[#06B6D4] mx-auto flex items-center justify-center">
-                  <History className="w-5 h-5" />
-                </div>
-                <p className="text-xs font-semibold text-white">No Telemetry Logged Yet</p>
-                <p className="text-[11px] text-slate-400">
-                  When you check air quality, verified readings are saved here.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {(showAllHistory ? groupedAllRecords : compactGroups).map((group) => (
-                  <div key={group.dateLabel} className="space-y-1.5">
-                    <span className="text-[11px] font-bold text-slate-300 block px-1">
-                      {group.dateLabel}
-                    </span>
-                    <div className="space-y-1.5">
-                      {group.records.map((rec) => renderHistoryRow(rec))}
+                {!hasEnoughRecords ? (
+                  <div className="p-4 text-center rounded-2xl bg-[#071A24] border border-slate-800 space-y-1">
+                    <p className="text-xs font-semibold text-slate-300">
+                      Not enough readings yet to chart a multi-point trend curve.
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      Readings are saved automatically as you check air quality.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="w-full overflow-hidden select-none pt-1">
+                    <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="w-full h-auto overflow-visible">
+                      <path
+                        d={pointsPath}
+                        fill="none"
+                        stroke="#06B6D4"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      {chartRecords.map((r, idx) => (
+                        <circle
+                          key={r.id}
+                          cx={getX(idx)}
+                          cy={getY(r.aqi)}
+                          r={3.5}
+                          fill="#5EEAD4"
+                          stroke="#071A24"
+                          strokeWidth="1.5"
+                        />
+                      ))}
+                    </svg>
+                    <div className="flex justify-between text-[9px] font-mono text-slate-500 px-2 pt-1 border-t border-slate-800 mt-1">
+                      <span>{chartRecords[0]?.date}</span>
+                      <span>{chartRecords[chartRecords.length - 1]?.date}</span>
                     </div>
                   </div>
-                ))}
-
-                {records.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowAllHistory(!showAllHistory)}
-                    className="w-full py-3.5 px-4 rounded-2xl bg-[#09212D] hover:bg-[#0F766E]/20 border border-[#263238] hover:border-[#0F766E]/60 text-[#5EEAD4] font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md group mt-2"
-                  >
-                    <span>
-                      {showAllHistory
-                        ? 'Show less history ↑'
-                        : `See More History (${records.length} records) →`}
-                    </span>
-                  </button>
                 )}
+              </section>
+
+              {/* AI Long-Term Trend Summary */}
+              {hasEnoughRecords && (
+                <section className="p-3.5 rounded-2xl bg-[#09212D] border border-[#263238] space-y-1.5 shadow-md">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-3.5 h-3.5 text-[#5EEAD4]" />
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-300">
+                      Exposure Trend Analysis
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-200 leading-relaxed">
+                    {trendExplanation}
+                  </p>
+                </section>
+              )}
+
+              {/* Compact Recent Air Quality List */}
+              <section className="space-y-3">
+                <div className="px-1 flex items-center justify-between">
+                  <h2 className="text-xs font-bold uppercase tracking-wider text-slate-300 font-mono">
+                    Recent Air Quality
+                  </h2>
+                  <span className="text-[10px] font-mono text-slate-500">Compact list</span>
+                </div>
+
+                {records.length === 0 ? (
+                  <div className="p-6 rounded-3xl bg-[#09212D]/60 border border-[#263238] text-center space-y-2">
+                    <div className="w-10 h-10 rounded-2xl bg-[#0F766E]/20 text-[#06B6D4] mx-auto flex items-center justify-center">
+                      <History className="w-5 h-5" />
+                    </div>
+                    <p className="text-xs font-semibold text-white">No Telemetry Logged Yet</p>
+                    <p className="text-[11px] text-slate-400">
+                      When you check air quality, verified readings are saved here.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {(showAllHistory ? groupedAllRecords : compactGroups).map((group) => (
+                      <div key={group.dateLabel} className="space-y-1.5">
+                        <span className="text-[11px] font-bold text-slate-300 block px-1">
+                          {group.dateLabel}
+                        </span>
+                        <div className="space-y-1.5">
+                          {group.records.map((rec) => renderHistoryRow(rec))}
+                        </div>
+                      </div>
+                    ))}
+
+                    {records.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAllHistory(!showAllHistory)}
+                        className="w-full py-3.5 px-4 rounded-2xl bg-[#09212D] hover:bg-[#0F766E]/20 border border-[#263238] hover:border-[#0F766E]/60 text-[#5EEAD4] font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md group mt-2"
+                      >
+                        <span>
+                          {showAllHistory
+                            ? 'Show less history ↑'
+                            : `See More History (${records.length} records) →`}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </section>
+
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => setAirQualitySubView('calendar')}
+                  className="w-full py-2.5 px-3 rounded-2xl bg-[#09212D]/60 hover:bg-[#09212D] border border-slate-800/80 hover:border-slate-700 text-slate-300 hover:text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Calendar className="w-3.5 h-3.5 text-[#06B6D4]" />
+                  <span>← Back to Monthly AQI Calendar</span>
+                </button>
               </div>
-            )}
-          </section>
+            </div>
+          )}
         </div>
       )}
 

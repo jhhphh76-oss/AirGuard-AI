@@ -22,7 +22,10 @@ export type PrototypeStage = 'P0' | 'P1' | 'P2' | 'P3';
 export type AcquisitionMode = 'live_camera' | 'gallery_upload';
 
 export type MeasurementDataStatus =
-  | 'REAL MEASUREMENT'
+  | 'Image captured'
+  | 'Experimental observation'
+  | 'Calibrated measurement'
+  | 'REAL MEASUREMENT' // preserved for backward compatibility with saved records
   | 'SIMULATED DATA'
   | 'RGB IMAGE ONLY'
   | 'MULTISPECTRAL HARDWARE NOT CONNECTED'
@@ -54,7 +57,7 @@ export interface CalibrationState {
   skinCaptured: boolean;
   normalized: boolean;
   isReady: boolean;
-  statusLabel: 'Ready' | 'Incomplete';
+  statusLabel: 'Calibrated' | 'Ready' | 'Calibration incomplete' | 'Not calibrated' | 'Incomplete';
   formula: string; // "Normalized Reflectance = (Sample - Dark) / (Reference - Dark)"
 }
 
@@ -107,13 +110,15 @@ export interface EnvironmentalSnapshot {
 
 export interface ImageQualityMetrics {
   qualityCategory: 'Good' | 'Needs Improvement';
+  imageSuitability: 'Verified' | 'Image suitability not verified';
   brightnessConsistency: number; // 0 - 100
   exposureQuality: 'Balanced' | 'Underexposed' | 'Overexposed';
   meanLuminance: number; // 0 - 255
   blurSharpnessScore: number; // High-frequency Laplacian gradient variance
   isSharp: boolean;
-  faceDetectionConfidence: number; // 0 - 100%
-  usableFaceAreaPercent: number; // 0 - 100%
+  faceDetected: boolean;
+  faceDetectionConfidence?: number; // Optional percentage
+  usableFaceAreaPercent?: number; // Optional percentage
   resolution: { width: number; height: number };
   issues: string[]; // List of honest quality issues
 }
@@ -124,9 +129,12 @@ export interface TimeAlignmentInfo {
   differenceMinutes: number | null;
   isAligned: boolean;
   alignmentStatus:
+    | 'Verified'
     | 'Time-aligned'
     | 'Environmental measurement is not sufficiently time-aligned'
-    | 'Environmental data unavailable for this measurement';
+    | 'Environmental data unavailable for this measurement'
+    | 'Unverified'
+    | 'Unavailable';
 }
 
 export interface PersonalBaselineComparison {
@@ -141,16 +149,17 @@ export interface PersonalBaselineComparison {
   averageOpticalShift: number | null; // delta standard deviation
   highestShiftRegion: string | null;
   comparisonNotes: string;
+  isExperimentalComparison?: boolean;
 }
 
 export interface DataQualityPanelStatus {
-  cameraAcquisition: 'Good' | 'Limited';
-  calibration: 'Valid' | 'Incomplete';
-  faceSegmentation: 'Valid' | 'Limited';
-  spectralData: 'Available' | 'Unavailable';
+  cameraAcquisition: 'Acquired' | 'Gallery upload' | 'Permission blocked' | 'Not acquired' | 'Good' | 'Limited';
+  calibration: 'Calibrated' | 'Calibration incomplete' | 'Not calibrated' | 'Valid' | 'Incomplete';
+  faceSegmentation: 'Verified' | 'Unverified' | 'Valid' | 'Limited';
+  spectralData: 'Available' | 'Unavailable' | 'Not measured';
   environmentalData: 'Available' | 'Unavailable';
-  timeAlignment: 'Valid' | 'Limited';
-  longitudinalData: 'Sufficient' | 'Insufficient';
+  timeAlignment: 'Verified' | 'Valid' | 'Unverified' | 'Unavailable' | 'Limited';
+  longitudinalData: 'Sufficient' | 'Insufficient' | 'Not yet assessed';
 }
 
 export interface QualifiedResearchInterpretation {
