@@ -89,6 +89,8 @@ export interface HistoryRecord {
   pollutants: Pollutants;
   indicators?: EnvironmentalIndicators;
   source: string;
+  isStale?: boolean;
+  lastAttemptFailed?: boolean;
   // Photo analysis record fields (Requirements 7 & 8)
   recordType?: 'telemetry' | 'photo_analysis';
   imageDataUrl?: string | null;

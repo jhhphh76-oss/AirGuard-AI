@@ -5,6 +5,7 @@ import { getAQICategory } from '../../services/airQualityService';
 import {
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Calendar as CalendarIcon,
   Clock,
   MapPin,
@@ -16,6 +17,7 @@ import {
   CheckCircle2,
   ListFilter,
   BarChart2,
+  Star,
 } from 'lucide-react';
 
 interface AQIHistoryCalendarProps {
@@ -39,23 +41,35 @@ const MONTH_NAMES = [
   'December',
 ];
 
-interface DailyAqiSummary {
+export interface DailyAqiSummary {
   primaryAqi: number;
+  maxAqi: number;
   category: string;
   color: string;
   bg: string;
   border: string;
   description: string;
   validCount: number;
+  isMultiple: boolean;
   isSummary: boolean;
   summaryTypeLabel: string;
   timeLabel: string;
+  maxTime: string;
   firstTime: string;
   lastTime: string;
+  maxObservation: HistoryRecord;
   locationName: string;
   locationCountry?: string;
   latitude: number;
   longitude: number;
+  pm2_5: number | null;
+  pm10: number | null;
+  o3: number | null;
+  no2: number | null;
+  so2: number | null;
+  co: number | null;
+  co2: number | null;
+  uv: number | null;
   avgPm2_5: number | null;
   avgPm10: number | null;
   avgO3: number | null;
@@ -78,75 +92,125 @@ interface CalendarDay {
 }
 
 /**
- * Calculates a mathematically sound, documented daily summary from valid observations.
- * Summary rule: Arithmetic mean of all verified observations with valid numeric AQI.
+ * Calculates the Daily Maximum AQI among genuine valid observations for a given date and location.
+ * Rule:
+ * 1. Filter genuine valid numeric AQI observations (r.aqi >= 0, not NaN, not stale/failed).
+ *    Treat a genuine AQI value of zero as valid.
+ *    Ignore missing, invalid, or failed observations. Never substitute zero for unavailable data.
+ * 2. Separate by location: Do not combine readings from different locations into one daily maximum.
+ * 3. If multiple valid observations exist, use the HIGHEST US AQI value (not average or latest).
+ * 4. If only one valid observation exists, display that value.
+ * 5. Returns null when no valid observations exist (does not fabricate or default to 0).
  */
-export function computeDailySummary(records: HistoryRecord[]): DailyAqiSummary | null {
+export function computeDailySummary(
+  records: HistoryRecord[],
+  targetLocationName?: string
+): DailyAqiSummary | null {
   if (!records || records.length === 0) return null;
 
   // Filter only genuine valid numeric AQI observations
-  const validRecords = records
-    .filter((r) => typeof r.aqi === 'number' && !isNaN(r.aqi) && r.aqi >= 0)
-    .sort((a, b) => a.retrievalTimestamp - b.retrievalTimestamp);
+  let validRecords = records.filter(
+    (r) =>
+      typeof r.aqi === 'number' &&
+      !isNaN(r.aqi) &&
+      r.aqi >= 0 &&
+      !r.isStale &&
+      !r.lastAttemptFailed
+  );
 
   if (validRecords.length === 0) return null;
 
-  const validCount = validRecords.length;
-  const isSummary = validCount > 1;
+  // Strict location separation: do not combine readings from different locations into one daily maximum
+  if (targetLocationName && targetLocationName.trim()) {
+    const targetNorm = targetLocationName.trim().toLowerCase();
+    validRecords = validRecords.filter(
+      (r) => r.location?.name && r.location.name.trim().toLowerCase() === targetNorm
+    );
+    if (validRecords.length === 0) return null;
+  } else {
+    // If no target location was explicitly provided, isolate to the location of the latest record
+    // so observations from different locations are NEVER combined into one daily maximum!
+    const primaryLoc = validRecords[validRecords.length - 1].location?.name?.trim().toLowerCase();
+    if (primaryLoc) {
+      validRecords = validRecords.filter(
+        (r) => r.location?.name && r.location.name.trim().toLowerCase() === primaryLoc
+      );
+    }
+  }
 
-  // Primary AQI value: single observation or arithmetic mean of valid observations
-  const primaryAqi = isSummary
-    ? Math.round(validRecords.reduce((sum, r) => sum + r.aqi, 0) / validCount)
-    : validRecords[0].aqi;
+  // Sort chronologically
+  validRecords.sort((a, b) => a.retrievalTimestamp - b.retrievalTimestamp);
 
+  // Find observation that produced the MAXIMUM valid US AQI
+  let maxRec = validRecords[0];
+  for (let i = 1; i < validRecords.length; i++) {
+    if (validRecords[i].aqi > maxRec.aqi) {
+      maxRec = validRecords[i];
+    }
+  }
+
+  const primaryAqi = maxRec.aqi;
   const catInfo = getAQICategory(primaryAqi);
+  const validCount = validRecords.length;
+  const isMultiple = validCount > 1;
+
   const firstTime = validRecords[0].time;
   const lastTime = validRecords[validRecords.length - 1].time;
 
-  const summaryTypeLabel = isSummary
-    ? `Daily Mean (${validCount} observations)`
+  const summaryTypeLabel = isMultiple
+    ? `Daily Maximum (${validCount} observations)`
     : 'Single observation';
 
-  const timeLabel = isSummary ? `${firstTime} – ${lastTime}` : `at ${firstTime}`;
+  const timeLabel = isMultiple
+    ? `Peak at ${maxRec.time} (${firstTime} – ${lastTime})`
+    : `at ${maxRec.time}`;
 
-  // Average pollutants
-  const calcAvg = (getter: (r: HistoryRecord) => number | null | undefined, roundDecimals = 1) => {
-    const vals = validRecords
-      .map(getter)
-      .filter((v): v is number => v !== null && v !== undefined && !isNaN(v));
-    if (vals.length === 0) return null;
-    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-    const factor = Math.pow(10, roundDecimals);
-    return Math.round(avg * factor) / factor;
-  };
-
-  const primaryRec = validRecords[validRecords.length - 1]; // latest observation for primary coordinates
+  const pm2_5 = maxRec.pollutants?.pm2_5 ?? null;
+  const pm10 = maxRec.pollutants?.pm10 ?? null;
+  const o3 = maxRec.pollutants?.o3 ?? null;
+  const no2 = maxRec.pollutants?.no2 ?? null;
+  const so2 = maxRec.pollutants?.so2 ?? null;
+  const co = maxRec.pollutants?.co ?? null;
+  const co2 = maxRec.pollutants?.co2 ?? null;
+  const uv = maxRec.indicators?.uv_index ?? null;
 
   return {
     primaryAqi,
+    maxAqi: primaryAqi,
     category: catInfo.category,
     color: catInfo.color,
     bg: catInfo.bg,
     border: catInfo.border,
     description: catInfo.description,
     validCount,
-    isSummary,
+    isMultiple,
+    isSummary: isMultiple,
     summaryTypeLabel,
     timeLabel,
+    maxTime: maxRec.time,
     firstTime,
     lastTime,
-    locationName: primaryRec.location.name,
-    locationCountry: primaryRec.location.country,
-    latitude: primaryRec.location.latitude,
-    longitude: primaryRec.location.longitude,
-    avgPm2_5: calcAvg((r) => r.pollutants?.pm2_5),
-    avgPm10: calcAvg((r) => r.pollutants?.pm10),
-    avgO3: calcAvg((r) => r.pollutants?.o3),
-    avgNo2: calcAvg((r) => r.pollutants?.no2),
-    avgSo2: calcAvg((r) => r.pollutants?.so2),
-    avgCo: calcAvg((r) => r.pollutants?.co),
-    avgCo2: calcAvg((r) => r.pollutants?.co2, 0),
-    avgUv: calcAvg((r) => r.indicators?.uv_index),
+    maxObservation: maxRec,
+    locationName: maxRec.location.name,
+    locationCountry: maxRec.location.country,
+    latitude: maxRec.location.latitude,
+    longitude: maxRec.location.longitude,
+    pm2_5,
+    pm10,
+    o3,
+    no2,
+    so2,
+    co,
+    co2,
+    uv,
+    avgPm2_5: pm2_5,
+    avgPm10: pm10,
+    avgO3: o3,
+    avgNo2: no2,
+    avgSo2: so2,
+    avgCo: co,
+    avgCo2: co2,
+    avgUv: uv,
     validRecords,
   };
 }
@@ -168,10 +232,88 @@ export const AQIHistoryCalendar: React.FC<AQIHistoryCalendarProps> = ({
   // Expanded state for individual observation details
   const [showIndividualObservations, setShowIndividualObservations] = useState<boolean>(true);
 
-  // Map all saved records by local date key 'YYYY-MM-DD'
+  // Extract distinct locations to prevent combining readings from different locations into one daily maximum
+  const availableLocations = useMemo(() => {
+    const locMap = new Map<string, { key: string; name: string; country?: string; count: number }>();
+    for (const r of records) {
+      if (r.location && r.location.name) {
+        const norm = r.location.name.trim();
+        const key = norm.toLowerCase();
+        const existing = locMap.get(key);
+        if (existing) {
+          existing.count++;
+        } else {
+          locMap.set(key, {
+            key,
+            name: norm,
+            country: r.location.country,
+            count: 1,
+          });
+        }
+      }
+    }
+    return Array.from(locMap.values());
+  }, [records]);
+
+  // Selected location (defaults to first available or empty)
+  const [selectedLocation, setSelectedLocation] = useState<string>('');
+
+  const activeLocation = useMemo(() => {
+    if (selectedLocation && availableLocations.some((l) => l.name.toLowerCase() === selectedLocation.toLowerCase())) {
+      return selectedLocation;
+    }
+    return availableLocations.length > 0 ? availableLocations[0].name : '';
+  }, [selectedLocation, availableLocations]);
+
+  // Dynamic available years list: at least past 5 years up to current year, plus any years with saved records
+  const availableYears = useMemo(() => {
+    const yearsSet = new Set<number>();
+    const currentYear = today.getFullYear();
+    for (let y = currentYear - 5; y <= currentYear; y++) {
+      yearsSet.add(y);
+    }
+    for (const r of records) {
+      if (r.retrievalTimestamp) {
+        const recYear = new Date(r.retrievalTimestamp).getFullYear();
+        if (!isNaN(recYear) && recYear >= 1990 && recYear <= currentYear + 1) {
+          yearsSet.add(recYear);
+        }
+      }
+    }
+    yearsSet.add(viewYear);
+    return Array.from(yearsSet).sort((a, b) => a - b);
+  }, [today, records, viewYear]);
+
+  // Convenient Month and Year selection handlers
+  const handleMonthSelect = useCallback((month: number) => {
+    setViewMonth(month);
+    if (viewYear === today.getFullYear() && month === today.getMonth()) {
+      setSelectedDateKey(todayKey);
+    } else {
+      setSelectedDateKey(`${viewYear}-${String(month + 1).padStart(2, '0')}-01`);
+    }
+  }, [viewYear, today, todayKey]);
+
+  const handleYearSelect = useCallback((year: number) => {
+    setViewYear(year);
+    if (year === today.getFullYear() && viewMonth === today.getMonth()) {
+      setSelectedDateKey(todayKey);
+    } else {
+      setSelectedDateKey(`${year}-${String(viewMonth + 1).padStart(2, '0')}-01`);
+    }
+  }, [viewMonth, today, todayKey]);
+
+  // Map all saved records by local date key 'YYYY-MM-DD' for the active location
   const recordsByDate = useMemo(() => {
     const map: Record<string, HistoryRecord[]> = {};
     for (const rec of records) {
+      // Isolate by active location to prevent cross-location merging
+      if (activeLocation) {
+        const recLoc = rec.location?.name?.trim().toLowerCase();
+        if (recLoc !== activeLocation.trim().toLowerCase()) {
+          continue;
+        }
+      }
       const key = getLocalDateKey(rec.retrievalTimestamp);
       if (!map[key]) {
         map[key] = [];
@@ -183,9 +325,9 @@ export const AQIHistoryCalendar: React.FC<AQIHistoryCalendarProps> = ({
       map[key].sort((a, b) => a.retrievalTimestamp - b.retrievalTimestamp);
     }
     return map;
-  }, [records]);
+  }, [records, activeLocation]);
 
-  // Month navigation handlers with intelligent date selection updates
+  // Month navigation handlers with intelligent date selection updates across year boundaries
   const handlePrevMonth = useCallback(() => {
     let nextYear = viewYear;
     let nextMonth = viewMonth - 1;
@@ -253,7 +395,7 @@ export const AQIHistoryCalendar: React.FC<AQIHistoryCalendarProps> = ({
         dayNumber: dayNum,
         isCurrentMonth: false,
         isToday: key === todayKey,
-        summary: computeDailySummary(dayRecs),
+        summary: computeDailySummary(dayRecs, activeLocation),
         records: dayRecs,
       });
     }
@@ -269,7 +411,7 @@ export const AQIHistoryCalendar: React.FC<AQIHistoryCalendarProps> = ({
         dayNumber: dayNum,
         isCurrentMonth: true,
         isToday: key === todayKey,
-        summary: computeDailySummary(dayRecs),
+        summary: computeDailySummary(dayRecs, activeLocation),
         records: dayRecs,
       });
     }
@@ -286,13 +428,13 @@ export const AQIHistoryCalendar: React.FC<AQIHistoryCalendarProps> = ({
         dayNumber: dayNum,
         isCurrentMonth: false,
         isToday: key === todayKey,
-        summary: computeDailySummary(dayRecs),
+        summary: computeDailySummary(dayRecs, activeLocation),
         records: dayRecs,
       });
     }
 
     return days;
-  }, [viewYear, viewMonth, recordsByDate, todayKey]);
+  }, [viewYear, viewMonth, recordsByDate, todayKey, activeLocation]);
 
   // Selected date details
   const selectedRecords = useMemo(() => {
@@ -300,8 +442,8 @@ export const AQIHistoryCalendar: React.FC<AQIHistoryCalendarProps> = ({
   }, [recordsByDate, selectedDateKey]);
 
   const selectedSummary = useMemo(() => {
-    return computeDailySummary(selectedRecords);
-  }, [selectedRecords]);
+    return computeDailySummary(selectedRecords, activeLocation);
+  }, [selectedRecords, activeLocation]);
 
   const formattedSelectedDate = useMemo(() => {
     const parts = selectedDateKey.split('-');
@@ -332,8 +474,8 @@ export const AQIHistoryCalendar: React.FC<AQIHistoryCalendarProps> = ({
       {/* 1. Monthly Calendar Navigation & Grid                                */}
       {/* =================================================================== */}
       <section className="p-3 sm:p-4 rounded-3xl bg-[#09212D] border border-[#263238] space-y-3 shadow-lg">
-        {/* Month Navigation Header */}
-        <div className="flex items-center justify-between">
+        {/* Month & Year Navigation Header with Convenient Selectors */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-8 h-8 rounded-xl bg-[#0F766E]/20 text-[#06B6D4] flex items-center justify-center border border-[#0F766E]/40 shrink-0">
               <CalendarIcon className="w-4 h-4" />
@@ -344,28 +486,66 @@ export const AQIHistoryCalendar: React.FC<AQIHistoryCalendarProps> = ({
                   {MONTH_NAMES[viewMonth]} {viewYear}
                 </span>
                 {viewYear === today.getFullYear() && viewMonth === today.getMonth() && (
-                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#0F766E]/40 text-[#5EEAD4] border border-[#0F766E] shrink-0">
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#0F766E]/40 text-[#5EEAD4] border border-[#0F766E] shrink-0 font-semibold">
                     Current
                   </span>
                 )}
               </h2>
               <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">
-                Daily US AQI observations
+                Daily maximum US AQI observations
+                {activeLocation ? ` · ${activeLocation}` : ''}
               </p>
             </div>
           </div>
 
-          {/* Jump to Today & Navigation Arrows */}
-          <div className="flex items-center gap-1.5 shrink-0">
+          {/* Convenient Month & Year Selectors and Navigation Arrows */}
+          <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap shrink-0">
+            {/* Convenient Month Selector */}
+            <div className="relative">
+              <select
+                value={viewMonth}
+                onChange={(e) => handleMonthSelect(parseInt(e.target.value, 10))}
+                className="appearance-none bg-[#071A24] hover:bg-[#0B2533] border border-slate-700/80 hover:border-[#06B6D4]/60 rounded-xl px-2.5 py-1 pr-6 text-xs font-mono font-bold text-slate-200 hover:text-white cursor-pointer transition-colors focus:outline-none focus:ring-1 focus:ring-[#06B6D4]"
+                aria-label="Select month"
+              >
+                {MONTH_NAMES.map((m, idx) => (
+                  <option key={m} value={idx} className="bg-[#071A24] text-white">
+                    {m}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2" />
+            </div>
+
+            {/* Convenient Year Selector */}
+            <div className="relative">
+              <select
+                value={viewYear}
+                onChange={(e) => handleYearSelect(parseInt(e.target.value, 10))}
+                className="appearance-none bg-[#071A24] hover:bg-[#0B2533] border border-slate-700/80 hover:border-[#06B6D4]/60 rounded-xl px-2.5 py-1 pr-6 text-xs font-mono font-bold text-slate-200 hover:text-white cursor-pointer transition-colors focus:outline-none focus:ring-1 focus:ring-[#06B6D4]"
+                aria-label="Select year"
+              >
+                {availableYears.map((yr) => (
+                  <option key={yr} value={yr} className="bg-[#071A24] text-white">
+                    {yr}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2" />
+            </div>
+
+            {/* Jump to Today */}
             <button
               type="button"
               onClick={handleJumpToToday}
-              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-mono font-medium transition-colors cursor-pointer border border-slate-700/60"
+              className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-mono font-medium transition-colors cursor-pointer border border-slate-700/60"
               title="Jump to current month & today"
             >
               Today
             </button>
-            <div className="flex items-center bg-slate-800/90 rounded-lg border border-slate-700/60 p-0.5">
+
+            {/* Previous and Next Month across year boundaries */}
+            <div className="flex items-center bg-slate-800/90 rounded-xl border border-slate-700/60 p-0.5">
               <button
                 type="button"
                 onClick={handlePrevMonth}
@@ -387,6 +567,35 @@ export const AQIHistoryCalendar: React.FC<AQIHistoryCalendarProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Location Selector (when records from multiple locations exist) */}
+        {availableLocations.length > 1 && (
+          <div className="flex items-center gap-2 p-2 rounded-xl bg-[#071A24] border border-slate-800 text-xs font-mono">
+            <span className="text-slate-400 flex items-center gap-1 shrink-0">
+              <MapPin className="w-3.5 h-3.5 text-[#06B6D4]" />
+              <span>Location:</span>
+            </span>
+            <div className="flex items-center gap-1.5 overflow-x-auto py-0.5">
+              {availableLocations.map((loc) => {
+                const isActive = loc.name.toLowerCase() === activeLocation.toLowerCase();
+                return (
+                  <button
+                    key={loc.key}
+                    type="button"
+                    onClick={() => setSelectedLocation(loc.name)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                      isActive
+                        ? 'bg-[#0F766E]/40 text-[#5EEAD4] border border-[#06B6D4]/60'
+                        : 'bg-slate-800/60 text-slate-300 hover:text-white border border-slate-700/60'
+                    }`}
+                  >
+                    {loc.name} ({loc.count})
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Days of Week Header */}
         <div className="grid grid-cols-7 gap-1 text-center select-none">
@@ -581,8 +790,8 @@ export const AQIHistoryCalendar: React.FC<AQIHistoryCalendarProps> = ({
                   >
                     {selectedSummary.primaryAqi}
                   </div>
-                  <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">
-                    US AQI
+                  <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider block">
+                    DAILY MAX US AQI
                   </span>
                 </div>
               </div>
@@ -592,7 +801,7 @@ export const AQIHistoryCalendar: React.FC<AQIHistoryCalendarProps> = ({
                 <div className="flex items-center gap-1.5 truncate">
                   <Clock className="w-3.5 h-3.5 text-[#06B6D4] shrink-0" />
                   <span className="truncate">
-                    {selectedSummary.isSummary ? 'Window: ' : 'Time: '}
+                    {selectedSummary.isMultiple ? 'Peak observation: ' : 'Observation time: '}
                     {selectedSummary.timeLabel}
                   </span>
                 </div>
@@ -612,8 +821,8 @@ export const AQIHistoryCalendar: React.FC<AQIHistoryCalendarProps> = ({
                 <div className="flex items-center gap-1.5 font-semibold">
                   <Wind className="w-3.5 h-3.5 text-[#06B6D4]" />
                   <span>
-                    {selectedSummary.isSummary
-                      ? 'Daily Mean Atmospheric Parameters'
+                    {selectedSummary.isMultiple
+                      ? `Atmospheric Parameters at Peak AQI (${selectedSummary.maxTime})`
                       : 'Atmospheric Parameters'}
                   </span>
                 </div>
@@ -626,49 +835,49 @@ export const AQIHistoryCalendar: React.FC<AQIHistoryCalendarProps> = ({
                 <div className="bg-[#09212D]/80 p-2 rounded-xl border border-slate-800/80">
                   <span className="text-slate-500 text-[10px] block">PM2.5</span>
                   <span className="text-slate-100 font-bold">
-                    {selectedSummary.avgPm2_5 !== null ? `${selectedSummary.avgPm2_5} µg/m³` : 'N/A'}
+                    {selectedSummary.pm2_5 !== null ? `${selectedSummary.pm2_5} µg/m³` : 'N/A'}
                   </span>
                 </div>
                 <div className="bg-[#09212D]/80 p-2 rounded-xl border border-slate-800/80">
                   <span className="text-slate-500 text-[10px] block">PM10</span>
                   <span className="text-slate-100 font-bold">
-                    {selectedSummary.avgPm10 !== null ? `${selectedSummary.avgPm10} µg/m³` : 'N/A'}
+                    {selectedSummary.pm10 !== null ? `${selectedSummary.pm10} µg/m³` : 'N/A'}
                   </span>
                 </div>
                 <div className="bg-[#09212D]/80 p-2 rounded-xl border border-slate-800/80">
                   <span className="text-slate-500 text-[10px] block">Ozone (O₃)</span>
                   <span className="text-slate-100 font-bold">
-                    {selectedSummary.avgO3 !== null ? `${selectedSummary.avgO3} µg/m³` : 'N/A'}
+                    {selectedSummary.o3 !== null ? `${selectedSummary.o3} µg/m³` : 'N/A'}
                   </span>
                 </div>
                 <div className="bg-[#09212D]/80 p-2 rounded-xl border border-slate-800/80">
                   <span className="text-slate-500 text-[10px] block">Nitrogen Dioxide</span>
                   <span className="text-slate-100 font-bold">
-                    {selectedSummary.avgNo2 !== null ? `${selectedSummary.avgNo2} µg/m³` : 'N/A'}
+                    {selectedSummary.no2 !== null ? `${selectedSummary.no2} µg/m³` : 'N/A'}
                   </span>
                 </div>
                 <div className="bg-[#09212D]/80 p-2 rounded-xl border border-slate-800/80">
                   <span className="text-slate-500 text-[10px] block">Sulphur Dioxide</span>
                   <span className="text-slate-100 font-bold">
-                    {selectedSummary.avgSo2 !== null ? `${selectedSummary.avgSo2} µg/m³` : 'N/A'}
+                    {selectedSummary.so2 !== null ? `${selectedSummary.so2} µg/m³` : 'N/A'}
                   </span>
                 </div>
                 <div className="bg-[#09212D]/80 p-2 rounded-xl border border-slate-800/80">
                   <span className="text-slate-500 text-[10px] block">Carbon Monoxide</span>
                   <span className="text-slate-100 font-bold">
-                    {selectedSummary.avgCo !== null ? `${selectedSummary.avgCo} µg/m³` : 'N/A'}
+                    {selectedSummary.co !== null ? `${selectedSummary.co} µg/m³` : 'N/A'}
                   </span>
                 </div>
                 <div className="bg-[#09212D]/80 p-2 rounded-xl border border-slate-800/80">
                   <span className="text-slate-500 text-[10px] block">CO₂ Background</span>
                   <span className="text-slate-100 font-bold">
-                    {selectedSummary.avgCo2 !== null ? `${selectedSummary.avgCo2} ppm` : 'N/A'}
+                    {selectedSummary.co2 !== null ? `${selectedSummary.co2} ppm` : 'N/A'}
                   </span>
                 </div>
                 <div className="bg-[#09212D]/80 p-2 rounded-xl border border-slate-800/80">
                   <span className="text-slate-500 text-[10px] block">UV Index</span>
                   <span className="text-slate-100 font-bold">
-                    {selectedSummary.avgUv !== null ? selectedSummary.avgUv : 'N/A'}
+                    {selectedSummary.uv !== null ? selectedSummary.uv : 'N/A'}
                   </span>
                 </div>
               </div>
@@ -696,13 +905,20 @@ export const AQIHistoryCalendar: React.FC<AQIHistoryCalendarProps> = ({
                 <div className="space-y-2">
                   {selectedSummary.validRecords.map((rec, index) => {
                     const cat = getAQICategory(rec.aqi);
+                    const isDailyMax =
+                      rec.id === selectedSummary.maxObservation.id ||
+                      (rec.aqi === selectedSummary.primaryAqi && rec.time === selectedSummary.maxTime);
                     return (
                       <div
                         key={rec.id || index}
-                        className="p-3 rounded-xl bg-[#071A24] border border-slate-800/90 hover:border-slate-700 transition-colors space-y-2"
+                        className={`p-3 rounded-xl border transition-colors space-y-2 ${
+                          isDailyMax
+                            ? 'bg-[#071A24] border-[#06B6D4]/50 shadow-sm'
+                            : 'bg-[#071A24] border-slate-800/90 hover:border-slate-700'
+                        }`}
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
+                          <div className="flex items-center gap-2 min-w-0 flex-wrap">
                             <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
                               #{index + 1}
                             </span>
@@ -713,6 +929,12 @@ export const AQIHistoryCalendar: React.FC<AQIHistoryCalendarProps> = ({
                             <span className="text-slate-300 text-xs truncate">
                               {rec.location.name}
                             </span>
+                            {isDailyMax && selectedSummary.isMultiple && (
+                              <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-[#06B6D4]/20 text-[#5EEAD4] border border-[#06B6D4]/40 flex items-center gap-1">
+                                <Star className="w-2.5 h-2.5 fill-[#5EEAD4]" />
+                                <span>DAILY MAX</span>
+                              </span>
+                            )}
                           </div>
 
                           <div className="flex items-center gap-2 shrink-0">

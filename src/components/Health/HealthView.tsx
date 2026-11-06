@@ -38,6 +38,7 @@ import {
   MapPin,
   Stethoscope,
   Camera,
+  Smartphone,
   Upload,
   RefreshCw,
   Clock,
@@ -97,6 +98,7 @@ export const HealthView: React.FC<HealthViewProps> = ({ reading, facilities = []
   const [showResearchAnalysis, setShowResearchAnalysis] = useState(false);
   const [showNearbyHospitals, setShowNearbyHospitals] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const phoneCameraInputRef = useRef<HTMLInputElement | null>(null);
   const researchDashboardRef = useRef<HTMLElement | null>(null);
 
   // Toggle symptom handler with direct navigation for "No symptoms" -> Home, "Other concern" -> AI Advisor, and dedicated face exposure flow
@@ -664,12 +666,24 @@ export const HealthView: React.FC<HealthViewProps> = ({ reading, facilities = []
           </span>
         </div>
 
-        {/* Hidden File Input for direct photo upload */}
+        {/* Hidden File Input for Phone Camera capture (direct native camera) */}
+        <input
+          ref={phoneCameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          aria-label="Use Your Phone Camera"
+          onChange={handleDirectFileUpload}
+        />
+
+        {/* Hidden File Input for gallery photo upload */}
         <input
           ref={fileInputRef}
           type="file"
           accept="image/*"
           className="hidden"
+          aria-label="Upload from Gallery"
           onChange={handleDirectFileUpload}
         />
 
@@ -691,28 +705,28 @@ export const HealthView: React.FC<HealthViewProps> = ({ reading, facilities = []
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-            {/* 📷 Capture Photo */}
+            {/* 📱 Use Your Phone Camera */}
             <button
               type="button"
-              onClick={() => setIsCameraOpen(true)}
+              onClick={() => phoneCameraInputRef.current?.click()}
               className={`py-3 px-3.5 rounded-2xl border font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
                 selectedImage
                   ? 'bg-[#0F766E]/30 border-[#06B6D4] text-white shadow-[0_0_12px_rgba(6,182,212,0.25)]'
                   : 'bg-[#071A24] border-slate-800 text-slate-200 hover:border-slate-700 hover:text-white'
               }`}
             >
-              <Camera className="w-4 h-4 text-[#5EEAD4] shrink-0" />
-              <span>Capture Photo</span>
+              <Smartphone className="w-4 h-4 text-[#5EEAD4] shrink-0" />
+              <span>Use Your Phone Camera</span>
             </button>
 
-            {/* 🖼 Upload Photo */}
+            {/* 🖼 Upload from Gallery */}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               className="py-3 px-3.5 rounded-2xl bg-[#071A24] border border-slate-800 hover:border-slate-700 text-slate-200 hover:text-white font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer"
             >
               <Upload className="w-4 h-4 text-[#38BDF8] shrink-0" />
-              <span>Upload Photo</span>
+              <span>Upload from Gallery</span>
             </button>
 
             {/* Continue without photo */}
@@ -730,6 +744,19 @@ export const HealthView: React.FC<HealthViewProps> = ({ reading, facilities = []
             </button>
           </div>
 
+          {/* Alternative live browser camera option */}
+          <div className="flex items-center justify-between text-[11px] px-1 text-slate-400">
+            <span>Prefer in-browser viewfinder?</span>
+            <button
+              type="button"
+              onClick={() => setIsCameraOpen(true)}
+              className="text-[#5EEAD4] hover:underline flex items-center gap-1 font-medium cursor-pointer"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>Launch live camera</span>
+            </button>
+          </div>
+
           {/* Photo Preview if an image is provided */}
           {selectedImage && (
             <div className="p-3 rounded-2xl bg-[#071A24] border border-slate-800 space-y-2 mt-2 animate-in fade-in">
@@ -741,27 +768,29 @@ export const HealthView: React.FC<HealthViewProps> = ({ reading, facilities = []
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
-                    onClick={() => setIsCameraOpen(true)}
+                    onClick={() => phoneCameraInputRef.current?.click()}
                     disabled={isAnalyzing}
-                    className="px-2 py-1 rounded-lg bg-slate-800 text-slate-300 hover:text-white text-[10px] font-semibold flex items-center gap-1 disabled:opacity-50 transition-colors"
+                    className="px-2 py-1 rounded-lg bg-slate-800 text-slate-300 hover:text-white text-[10px] font-semibold flex items-center gap-1 disabled:opacity-50 transition-colors cursor-pointer"
+                    title="Retake with phone camera"
                   >
-                    <RefreshCw className="w-3 h-3" />
+                    <Smartphone className="w-3 h-3 text-[#5EEAD4]" />
                     <span>Retake</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isAnalyzing}
-                    className="px-2 py-1 rounded-lg bg-slate-800 text-slate-300 hover:text-white text-[10px] font-semibold flex items-center gap-1 disabled:opacity-50 transition-colors"
+                    className="px-2 py-1 rounded-lg bg-slate-800 text-slate-300 hover:text-white text-[10px] font-semibold flex items-center gap-1 disabled:opacity-50 transition-colors cursor-pointer"
+                    title="Change from gallery"
                   >
-                    <Upload className="w-3 h-3" />
-                    <span>Change</span>
+                    <Upload className="w-3 h-3 text-[#38BDF8]" />
+                    <span>Gallery</span>
                   </button>
                   <button
                     type="button"
                     onClick={handleRemoveImage}
                     disabled={isAnalyzing}
-                    className="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-[#EF4444] disabled:opacity-50 transition-colors"
+                    className="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-[#EF4444] disabled:opacity-50 transition-colors cursor-pointer"
                     title="Remove photo"
                     aria-label="Remove photo"
                   >

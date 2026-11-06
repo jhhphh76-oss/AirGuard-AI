@@ -363,7 +363,7 @@ export const HealthCameraModal: React.FC<HealthCameraModalProps> = ({
                   className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
                 >
                   <Smartphone className="w-4 h-4 text-[#38BDF8]" />
-                  <span>Device Camera App</span>
+                  <span>Use Your Phone Camera</span>
                 </button>
                 <button
                   type="button"
@@ -403,7 +403,7 @@ export const HealthCameraModal: React.FC<HealthCameraModalProps> = ({
                   className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
                 >
                   <Smartphone className="w-4 h-4 text-[#38BDF8]" />
-                  <span>Device Camera App</span>
+                  <span>Use Your Phone Camera</span>
                 </button>
                 <button
                   type="button"

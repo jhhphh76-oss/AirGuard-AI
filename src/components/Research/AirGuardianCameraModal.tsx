@@ -16,6 +16,7 @@ import {
   HelpCircle,
   CheckCircle2,
   Lock,
+  Smartphone,
 } from 'lucide-react';
 import {
   FaceRegion,
@@ -88,6 +89,7 @@ export const AirGuardianCameraModal: React.FC<AirGuardianCameraModalProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const nativeCameraInputRef = useRef<HTMLInputElement | null>(null);
 
   // Stop camera tracks cleanly
   const stopStream = useCallback(() => {
@@ -211,6 +213,41 @@ export const AirGuardianCameraModal: React.FC<AirGuardianCameraModalProps> = ({
       if (dataUrl) {
         stopStream();
         setAcquisitionMode('gallery_upload');
+        setCapturedDataUrl(dataUrl);
+
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth || 640;
+          canvas.height = img.naturalHeight || 640;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0);
+            evaluatePreviewImage(canvas);
+          }
+        };
+        img.src = dataUrl;
+
+        calibrationService.markSkinCaptured(true);
+        setCalibration(calibrationService.getStatus());
+        setStage('preview');
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  // Native phone camera capture handler (opens device camera app directly)
+  const handleNativeCameraUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (dataUrl) {
+        stopStream();
+        setAcquisitionMode('live_camera');
         setCapturedDataUrl(dataUrl);
 
         const img = new Image();
@@ -453,6 +490,17 @@ export const AirGuardianCameraModal: React.FC<AirGuardianCameraModalProps> = ({
           onChange={handleFileUpload}
         />
 
+        {/* Hidden Native Phone Camera Input */}
+        <input
+          ref={nativeCameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="user"
+          className="hidden"
+          aria-label="Use Your Phone Camera"
+          onChange={handleNativeCameraUpload}
+        />
+
         {/* Modal Body */}
         <div className="p-3.5 sm:p-4 space-y-4 overflow-y-auto flex-1 text-xs">
           {/* Scientific Disclaimer Banner */}
@@ -484,22 +532,31 @@ export const AirGuardianCameraModal: React.FC<AirGuardianCameraModalProps> = ({
                     <span>Camera Permission Blocked</span>
                   </div>
                   <p className="text-[11px] text-slate-200 leading-snug">
-                    Camera access was denied in your browser settings. You can still upload images directly from your gallery, or manage permissions.
+                    Camera access was denied in your browser settings. You can still use your native phone camera, upload images from your gallery, or manage permissions.
                   </p>
-                  <div className="flex items-center gap-2 pt-1">
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
                     <button
                       type="button"
-                      onClick={() => setShowManageGuidance(!showManageGuidance)}
-                      className="px-3 py-1.5 rounded-xl bg-slate-800 text-slate-200 text-xs font-semibold hover:bg-slate-700 transition-colors"
+                      onClick={() => nativeCameraInputRef.current?.click()}
+                      className="px-3 py-1.5 rounded-xl bg-[#0F766E] text-white text-xs font-bold hover:bg-[#0F766E]/80 transition-colors flex items-center gap-1.5 cursor-pointer"
                     >
-                      {showManageGuidance ? 'Hide Guidance' : 'Manage Permission'}
+                      <Smartphone className="w-3.5 h-3.5 text-[#5EEAD4]" />
+                      <span>Use Your Phone Camera</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="px-3 py-1.5 rounded-xl bg-[#0F766E] text-white text-xs font-bold hover:bg-[#0F766E]/80 transition-colors"
+                      className="px-3 py-1.5 rounded-xl bg-slate-800 text-slate-200 text-xs font-semibold hover:bg-slate-700 transition-colors flex items-center gap-1.5 cursor-pointer"
                     >
-                      Upload from Gallery
+                      <Upload className="w-3.5 h-3.5 text-[#38BDF8]" />
+                      <span>Upload Gallery</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowManageGuidance(!showManageGuidance)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 transition-colors cursor-pointer"
+                    >
+                      {showManageGuidance ? 'Hide Guidance' : 'Manage Permission'}
                     </button>
                   </div>
 
@@ -564,28 +621,37 @@ export const AirGuardianCameraModal: React.FC<AirGuardianCameraModalProps> = ({
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2.5 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
                     <button
                       type="button"
-                      onClick={startCamera}
-                      disabled={isRequestingPermission}
-                      className="py-3.5 px-3 rounded-2xl bg-[#0F766E] hover:bg-[#0F766E]/80 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer"
+                      onClick={() => nativeCameraInputRef.current?.click()}
+                      className="py-3 px-3 rounded-2xl bg-[#0F766E] hover:bg-[#0F766E]/80 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer"
                     >
-                      {isRequestingPermission ? (
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Camera className="w-4 h-4" />
-                      )}
-                      <span>Capture Photo</span>
+                      <Smartphone className="w-4 h-4 text-[#5EEAD4]" />
+                      <span>Use Your Phone Camera</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="py-3.5 px-3 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-[0.98] border border-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
+                      className="py-3 px-3 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-[0.98] border border-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
                     >
                       <Upload className="w-4 h-4 text-[#38BDF8]" />
                       <span>Upload Gallery</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={startCamera}
+                      disabled={isRequestingPermission}
+                      className="py-3 px-3 rounded-2xl bg-[#071A24] hover:bg-slate-800 active:scale-[0.98] border border-slate-700 text-slate-300 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
+                    >
+                      {isRequestingPermission ? (
+                        <RefreshCw className="w-4 h-4 animate-spin text-[#5EEAD4]" />
+                      ) : (
+                        <Camera className="w-4 h-4 text-[#5EEAD4]" />
+                      )}
+                      <span>Live In-Browser</span>
                     </button>
                   </div>
                 </div>
@@ -674,22 +740,24 @@ export const AirGuardianCameraModal: React.FC<AirGuardianCameraModalProps> = ({
               )}
 
               {/* Action Buttons: Retake / Change / Analyze */}
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={handleRetake}
-                  className="py-3 px-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  onClick={() => nativeCameraInputRef.current?.click()}
+                  className="py-3 px-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  title="Retake photo using phone camera"
                 >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Retake</span>
+                  <Smartphone className="w-3.5 h-3.5 text-[#5EEAD4]" />
+                  <span>Phone Camera</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   className="py-3 px-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  title="Choose image from gallery"
                 >
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>Upload Other</span>
+                  <Upload className="w-3.5 h-3.5 text-[#38BDF8]" />
+                  <span>Gallery</span>
                 </button>
                 <button
                   type="button"

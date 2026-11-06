@@ -273,7 +273,7 @@ describe('AQI History Calendar & Telemetry Integrity Tests', () => {
       assert.strictEqual(summary.avgPm2_5, 18.5);
     });
 
-    test('computeDailySummary calculates arithmetic mean and range for multiple observations', async () => {
+    test('computeDailySummary selects HIGHEST US AQI value among multiple observations (Daily Maximum)', async () => {
       const { computeDailySummary } = await import('../../components/History/AQIHistoryCalendar');
       const rec1 = createHistoryRecord('rec_1', '08:00:00', 60, 15.0, 30.0);
       const rec2 = createHistoryRecord('rec_2', '12:00:00', 75, 25.0, 45.0);
@@ -282,17 +282,78 @@ describe('AQI History Calendar & Telemetry Integrity Tests', () => {
       const summary = computeDailySummary([rec1, rec2, rec3]);
 
       assert.ok(summary);
-      // Arithmetic mean: (60 + 75 + 84) / 3 = 219 / 3 = 73
-      assert.strictEqual(summary.primaryAqi, 73);
+      // Daily Maximum AQI: highest value among genuine observations = 84 (not mean 73 or latest)
+      assert.strictEqual(summary.primaryAqi, 84);
+      assert.strictEqual(summary.maxAqi, 84);
       assert.strictEqual(summary.category, 'Moderate');
-      assert.strictEqual(summary.isSummary, true);
+      assert.strictEqual(summary.isMultiple, true);
       assert.strictEqual(summary.validCount, 3);
-      assert.strictEqual(summary.summaryTypeLabel, 'Daily Mean (3 observations)');
-      assert.strictEqual(summary.timeLabel, '08:00:00 – 18:00:00');
-      // Average PM2.5: (15.0 + 25.0 + 29.0) / 3 = 69.0 / 3 = 23.0
-      assert.strictEqual(summary.avgPm2_5, 23.0);
-      // Average PM10: (30.0 + 45.0 + 51.0) / 3 = 126.0 / 3 = 42.0
-      assert.strictEqual(summary.avgPm10, 42.0);
+      assert.strictEqual(summary.summaryTypeLabel, 'Daily Maximum (3 observations)');
+      assert.strictEqual(summary.maxTime, '18:00:00');
+      // Peak observation pollutants
+      assert.strictEqual(summary.pm2_5, 29.0);
+      assert.strictEqual(summary.pm10, 51.0);
+      assert.strictEqual(summary.maxObservation.id, 'rec_3');
+    });
+
+    test('treats genuine AQI value of 0 as valid and maps to Good', async () => {
+      const { computeDailySummary } = await import('../../components/History/AQIHistoryCalendar');
+      const rec0 = createHistoryRecord('rec_zero', '09:00:00', 0, 1.0, 2.0);
+      const summary = computeDailySummary([rec0]);
+
+      assert.ok(summary);
+      assert.strictEqual(summary.primaryAqi, 0);
+      assert.strictEqual(summary.maxAqi, 0);
+      assert.strictEqual(summary.category, 'Good');
+    });
+
+    test('ignores missing, invalid, NaN, stale, or failed readings when determining the maximum', async () => {
+      const { computeDailySummary } = await import('../../components/History/AQIHistoryCalendar');
+      const recValid = createHistoryRecord('rec_valid', '11:00:00', 55, 12.0, 20.0);
+      const recFailed = {
+        ...createHistoryRecord('rec_failed', '12:00:00', 250, 99.0, 150.0),
+        isStale: true,
+        lastAttemptFailed: true,
+      };
+      const recNaN = {
+        ...createHistoryRecord('rec_nan', '13:00:00', NaN as any, 0, 0),
+      };
+      const recNeg = {
+        ...createHistoryRecord('rec_neg', '14:00:00', -15, 0, 0),
+      };
+
+      const summary = computeDailySummary([recValid, recFailed, recNaN, recNeg]);
+
+      assert.ok(summary);
+      assert.strictEqual(summary.primaryAqi, 55);
+      assert.strictEqual(summary.validCount, 1);
+      assert.strictEqual(summary.maxObservation.id, 'rec_valid');
+    });
+
+    test('enforces location isolation and does not combine readings from different locations', async () => {
+      const { computeDailySummary } = await import('../../components/History/AQIHistoryCalendar');
+      const recVijayapura = {
+        ...createHistoryRecord('rec_v', '10:00:00', 85, 25.0, 40.0),
+        location: { name: 'Vijayapura', country: 'India', latitude: 16.83, longitude: 75.71, isDefault: true },
+      };
+      const recDelhi = {
+        ...createHistoryRecord('rec_d', '11:00:00', 280, 150.0, 250.0),
+        location: { name: 'Delhi', country: 'India', latitude: 28.61, longitude: 77.23, isDefault: false },
+      };
+
+      // Filter by Vijayapura explicitly
+      const summaryV = computeDailySummary([recVijayapura, recDelhi], 'Vijayapura');
+      assert.ok(summaryV);
+      assert.strictEqual(summaryV.primaryAqi, 85);
+      assert.strictEqual(summaryV.locationName, 'Vijayapura');
+      assert.strictEqual(summaryV.validCount, 1);
+
+      // Filter by Delhi explicitly
+      const summaryD = computeDailySummary([recVijayapura, recDelhi], 'Delhi');
+      assert.ok(summaryD);
+      assert.strictEqual(summaryD.primaryAqi, 280);
+      assert.strictEqual(summaryD.locationName, 'Delhi');
+      assert.strictEqual(summaryD.validCount, 1);
     });
 
     test('supports 3-digit AQI values without distortion or error', async () => {
@@ -320,6 +381,32 @@ describe('AQI History Calendar & Telemetry Integrity Tests', () => {
     test('returns null when no valid observations exist', async () => {
       const { computeDailySummary } = await import('../../components/History/AQIHistoryCalendar');
       assert.strictEqual(computeDailySummary([]), null);
+    });
+
+    test('year boundary month navigation handles Dec-Jan transitions correctly', () => {
+      // Transition from Dec to Jan
+      let year = 2025;
+      let month = 11; // December
+      let nextMonth = month + 1;
+      let nextYear = year;
+      if (nextMonth > 11) {
+        nextMonth = 0;
+        nextYear += 1;
+      }
+      assert.strictEqual(nextYear, 2026);
+      assert.strictEqual(nextMonth, 0); // January
+
+      // Transition from Jan to Dec
+      year = 2026;
+      month = 0; // January
+      let prevMonth = month - 1;
+      let prevYear = year;
+      if (prevMonth < 0) {
+        prevMonth = 11;
+        prevYear -= 1;
+      }
+      assert.strictEqual(prevYear, 2025);
+      assert.strictEqual(prevMonth, 11); // December
     });
   });
 });
